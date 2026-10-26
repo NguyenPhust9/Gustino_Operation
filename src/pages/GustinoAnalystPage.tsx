@@ -85,7 +85,8 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
     ? financialConfig.fixed_cost / financialConfig.gross_margin_rate
     : null
   const kpiProgress = financialConfig?.kpi_target && data ? data.overview.revenue / financialConfig.kpi_target : null
-  const periodTiming = monthTiming(to)
+  const latestDataDate = data?.daily.at(-1)?.date || to
+  const periodTiming = monthTiming(latestDataDate)
   const forecastProgress = kpiProgress === null ? null : kpiProgress / periodTiming.elapsedRate
   const paceGap = kpiProgress === null ? null : periodTiming.elapsedRate - kpiProgress
   const breakEvenProgress = financialConfig?.kpi_target && breakEvenRevenue !== null ? breakEvenRevenue / financialConfig.kpi_target : null
@@ -172,7 +173,7 @@ function formatPercent(value: number, digits = 0) { return `${(value * 100).toLo
 function scalePosition(value: number) { return `${Math.max(0, Math.min(100, value / 1.2 * 100))}%` }
 function formatDate(value: string) { const [year, month, day] = value.slice(0,10).split('-'); return `${day}/${month}/${year}` }
 function formatDateTime(value: string) { return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) }
-function currentMonthRange() { const now = new Date(); const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }); const to = formatter.format(now); return { from: `${to.slice(0, 7)}-01`, to } }
+function currentMonthRange() { const now = new Date(); const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }); const today = formatter.format(now); const [year, month] = today.split('-').map(Number); const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate(); return { from: `${today.slice(0, 7)}-01`, to: `${today.slice(0, 7)}-${String(lastDay).padStart(2, '0')}` } }
 function monthTiming(value: string) { const [year, month, day] = value.split('-').map(Number); const totalDays = new Date(Date.UTC(year, month, 0)).getUTCDate(); const elapsedDays = Math.min(day, totalDays); return { elapsedDays, totalDays, elapsedRate: elapsedDays / totalDays } }
 function buildRevenueChart(rows: AnalystPayload['daily'], from: string, to: string, config: FinancialConfig | null) {
   const byDate = new Map(rows.map((row) => [row.date, row.revenue])); const result = []; let cumulative = 0
