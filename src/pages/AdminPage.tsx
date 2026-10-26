@@ -537,6 +537,11 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
       const managedBranchIds = permittedBranchIds(user)
       const refreshContext = managementRefreshContextRef.current
       const dataNeeds = managementDataNeeds(refreshContext.activeSection, refreshContext.focused)
+      const revenueWarnings: string[] = []
+      const revenueSafe = async <T,>(label: string, request: Promise<T>, fallback: T) => {
+        if (refreshContext.activeSection !== 'revenue') return request
+        try { return await request } catch { revenueWarnings.push(label); return fallback }
+      }
       const receiptFrom = refreshContext.from < refreshContext.rankingMonthFrom ? refreshContext.from : refreshContext.rankingMonthFrom
       const receiptTo = refreshContext.to > refreshContext.rankingMonthTo ? refreshContext.to : refreshContext.rankingMonthTo
       const [
@@ -553,17 +558,17 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
         nextReportSnapshots,
         nextSalesReceipts,
       ] = await Promise.all([
-        dataNeeds.has('employees') ? fetchEmployees(user, { includeInactive: true, readContext }) : Promise.resolve(employees),
+        dataNeeds.has('employees') ? revenueSafe('nhân viên', fetchEmployees(user, { includeInactive: true, readContext }), employees) : Promise.resolve(employees),
         dataNeeds.has('shifts') ? fetchWorkShifts(user, readContext) : Promise.resolve(shifts),
         dataNeeds.has('registrations') ? fetchShiftRegistrations(user, { from: receiptFrom, to: receiptTo, readContext }) : Promise.resolve(registrations),
         dataNeeds.has('records') ? fetchAttendanceRecords(user, { from: receiptFrom, to: receiptTo, readContext }) : Promise.resolve(records),
         dataNeeds.has('adjustments') ? fetchAttendanceAdjustments(user, { from: receiptFrom, to: receiptTo }) : Promise.resolve(attendanceAdjustments),
-        dataNeeds.has('movements') ? Promise.all(managedBranchIds.map((id) => fetchMovements(id, user))).then((items) => items.flat()) : Promise.resolve(movements),
+        dataNeeds.has('movements') ? revenueSafe('kho hàng', Promise.all(managedBranchIds.map((id) => fetchMovements(id, user))).then((items) => items.flat()), movements) : Promise.resolve(movements),
         dataNeeds.has('inventoryReports') ? Promise.all(managedBranchIds.map((id) => fetchInventoryReports(id, user))).then((items) => items.flat()) : Promise.resolve(inventoryReports),
-        dataNeeds.has('allocations') ? Promise.all(managedBranchIds.map((id) => fetchBagAllocations(user, { branchId: id }))).then((items) => items.flat()) : Promise.resolve(bagAllocations),
+        dataNeeds.has('allocations') ? revenueSafe('phát túi', Promise.all(managedBranchIds.map((id) => fetchBagAllocations(user, { branchId: id }))).then((items) => items.flat()), bagAllocations) : Promise.resolve(bagAllocations),
         dataNeeds.has('sessions') ? Promise.all(managedBranchIds.map((id) => fetchBagShiftSessions(user, { branchId: id, from: receiptFrom, to: receiptTo }))).then((items) => items.flat()) : Promise.resolve(bagSessions),
         dataNeeds.has('requests') ? fetchSupplyRequests(user, managedBranchIds) : Promise.resolve(supplyRequests),
-        dataNeeds.has('snapshots') ? Promise.all(managedBranchIds.map((id) => fetchReportSnapshots(id, user))).then((items) => items.flat()) : Promise.resolve(reportSnapshots),
+        dataNeeds.has('snapshots') ? revenueSafe('báo cáo ca', Promise.all(managedBranchIds.map((id) => fetchReportSnapshots(id, user))).then((items) => items.flat()), reportSnapshots) : Promise.resolve(reportSnapshots),
         dataNeeds.has('receipts') ? fetchSalesReceiptsRange(user, { branchIds: managedBranchIds, from: receiptFrom, to: receiptTo }) : Promise.resolve(salesReceipts),
       ])
       setEmployees(nextEmployees)
@@ -578,7 +583,7 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
       setSupplyRequests(nextSupplyRequests)
       setReportSnapshots(nextReportSnapshots)
       setSalesReceipts(nextSalesReceipts)
-      setError('')
+      setError(revenueWarnings.length ? `Doanh thu POS đã tải; chưa tải được dữ liệu phụ: ${revenueWarnings.join(', ')}.` : '')
       } catch (reason) {
         if (showLoading) setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu quản lý.')
       } finally {
