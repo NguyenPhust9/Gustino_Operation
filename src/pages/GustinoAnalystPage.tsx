@@ -19,6 +19,13 @@ interface AnalystPayload {
   topItems: Array<{ name: string; quantity: number; revenue: number; invoiceCount: number }>
 }
 
+interface FinancialConfig {
+  period_month: string
+  fixed_cost: number
+  gross_margin_rate: number
+  kpi_target: number | null
+}
+
 const COLORS = ['#2d9cdb', '#8b5cf6', '#6366f1', '#10b981', '#f59e0b', '#94a3b8']
 
 export function GustinoAnalystPage({ user }: { user: AppUser }) {
@@ -27,6 +34,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const [to, setTo] = useState(initial.to)
   const [branchId, setBranchId] = useState('')
   const [data, setData] = useState<AnalystPayload | null>(null)
+  const [financialConfig, setFinancialConfig] = useState<FinancialConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadTick, setReloadTick] = useState(0)
@@ -45,7 +53,16 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         const response = await fetch(`/api/gustino-analyst?${params}`, { headers: { Authorization: `Bearer ${token}` } })
         const payload = await response.json().catch(() => null)
         if (!response.ok) throw new Error(payload?.error || 'Không thể tải dữ liệu CUKCUK.')
-        if (active) setData(payload)
+        const periodMonth = `${from.slice(0, 7)}-01`
+        const configResult = await supabase
+          ?.from('analytics_financial_configs')
+          .select('period_month,fixed_cost,gross_margin_rate,kpi_target')
+          .eq('period_month', periodMonth)
+          .maybeSingle()
+        if (active) {
+          setData(payload)
+          setFinancialConfig((configResult?.data as FinancialConfig | null) || null)
+        }
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu CUKCUK.')
       } finally {
@@ -59,6 +76,9 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const peak = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.invoices - a.invoices)[0], [data])
   const peakRevenue = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.revenue - a.revenue)[0], [data])
   const maxItemRevenue = data?.topItems[0]?.revenue || 1
+  const breakEvenRevenue = financialConfig && financialConfig.gross_margin_rate > 0
+    ? financialConfig.fixed_cost / financialConfig.gross_margin_rate
+    : null
 
   if (user.role !== 'admin') return <div className="analyst-state error">Chỉ Admin được xem Gustino Analyst.</div>
 
@@ -81,8 +101,8 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         <section className="analyst-heading"><div><h1>Tổng quan toàn chuỗi</h1><p>{formatDate(from)} – {formatDate(to)} · nguồn CUKCUK API</p></div><small>Dữ liệu cập nhật {formatDateTime(data.generatedAt)}</small></section>
         <section className="analyst-kpis">
           <KpiCard tone="purple" label="Doanh thu thực tế" value={money(data.overview.revenue)} detail={`${data.overview.invoiceCount.toLocaleString('vi-VN')} hóa đơn đã thu tiền`} />
-          <KpiCard tone="blue" label="Giá trị đơn trung bình" value={money(data.overview.averageOrderValue)} detail={`${data.overview.cancelledCount} hóa đơn hủy đã loại`} />
-          <KpiCard tone="orange" label="Sản lượng" value={`${formatNumber(data.overview.quantity)} phần`} detail={`${data.overview.distinctItems} món phát sinh`} />
+          <KpiCard tone="blue" label="Doanh thu hòa vốn kỳ" value={breakEvenRevenue === null ? 'Chưa cấu hình' : money(breakEvenRevenue)} detail={financialConfig ? `Lãi gộp ${percentRate(financialConfig.gross_margin_rate)} · Định phí ${compactMoney(financialConfig.fixed_cost)}` : `Chưa có cấu hình tháng ${from.slice(5, 7)}/${from.slice(0, 4)}`} />
+          <KpiCard tone="orange" label="Đơn hàng" value={data.overview.invoiceCount.toLocaleString('vi-VN')} detail={`TB/đơn ${money(data.overview.averageOrderValue)} · loại ${data.overview.cancelledCount} đơn hủy`} />
           <KpiCard tone="green" label="Quy mô giỏ hàng" value={`${data.overview.basketSize.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} món/đơn`} detail={peak ? `Giờ đông nhất ${peak.hour}:00 · ${peak.invoices} đơn` : 'Chưa có dữ liệu giờ'} />
         </section>
 
@@ -119,6 +139,7 @@ function money(value: number) { return `${Math.round(value).toLocaleString('vi-V
 function compactMoney(value: number) { return value >= 1_000_000 ? `${(value / 1_000_000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} tr` : money(value) }
 function formatNumber(value: number) { return value.toLocaleString('vi-VN', { maximumFractionDigits: 2 }) }
 function percent(value: number, total: number) { return total ? `${Math.round(value / total * 100)}%` : '0%' }
+function percentRate(value: number) { return `${(value * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%` }
 function formatDate(value: string) { const [year, month, day] = value.slice(0,10).split('-'); return `${day}/${month}/${year}` }
 function formatDateTime(value: string) { return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) }
 function currentMonthRange() { const now = new Date(); const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }); const to = formatter.format(now); return { from: `${to.slice(0, 7)}-01`, to } }
