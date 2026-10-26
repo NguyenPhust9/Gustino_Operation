@@ -43,6 +43,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const [error, setError] = useState('')
   const [reloadTick, setReloadTick] = useState(0)
   const [revenueMode, setRevenueMode] = useState<'daily' | 'cumulative'>('daily')
+  const [itemMode, setItemMode] = useState<'revenue' | 'quantity'>('revenue')
 
   useEffect(() => {
     if (user.role !== 'admin') return
@@ -80,7 +81,8 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
 
   const peak = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.invoices - a.invoices)[0], [data])
   const peakRevenue = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.revenue - a.revenue)[0], [data])
-  const maxItemRevenue = data?.topItems[0]?.revenue || 1
+  const rankedItems = useMemo(() => [...(data?.topItems || [])].sort((a,b) => itemMode === 'quantity' ? b.quantity-a.quantity : b.revenue-a.revenue).slice(0,10), [data, itemMode])
+  const maxItemMetric = itemMode === 'quantity' ? rankedItems[0]?.quantity || 1 : rankedItems[0]?.revenue || 1
   const breakEvenRevenue = financialConfig && financialConfig.gross_margin_rate > 0
     ? financialConfig.fixed_cost / financialConfig.gross_margin_rate
     : null
@@ -146,7 +148,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         </section>
 
         <section className="analyst-grid analyst-grid-equal">
-          <article className="analyst-card"><CardTitle icon="▦" title="Top 10 món bán chạy" subtitle={`${data.overview.distinctItems} món · ${formatNumber(data.overview.quantity)} phần bán ra`} /><div className="analyst-table-wrap"><table className="analyst-table"><thead><tr><th>#</th><th>Tên món</th><th>SL</th><th>Doanh thu đóng góp</th></tr></thead><tbody>{data.topItems.map((item, index) => <tr key={item.name}><td><b className={`analyst-rank rank-${index + 1}`}>{index + 1}</b></td><td><strong>{item.name}</strong><small>{item.invoiceCount} đơn</small></td><td>{formatNumber(item.quantity)}</td><td><strong>{money(item.revenue)}</strong><i><span style={{ width: `${Math.max(4, item.revenue / maxItemRevenue * 100)}%` }} /></i></td></tr>)}</tbody></table></div></article>
+          <article className="analyst-card"><div className="analyst-chart-head"><CardTitle icon="▦" title="Top 10 món bán chạy" subtitle={`${data.overview.distinctItems} món · ${formatNumber(data.overview.quantity)} phần bán ra`} /><div><button className={itemMode==='revenue'?'active':''} onClick={()=>setItemMode('revenue')}>Doanh thu</button><button className={itemMode==='quantity'?'active':''} onClick={()=>setItemMode('quantity')}># Số lượng</button></div></div><div className="analyst-table-wrap"><table className="analyst-table"><thead><tr><th>#</th><th>Tên món</th><th>SL</th><th>Doanh thu đóng góp</th></tr></thead><tbody>{rankedItems.map((item, index) => <tr key={item.name}><td><b className={`analyst-rank rank-${index + 1}`}>{index + 1}</b></td><td><strong>{item.name}</strong><small>{item.invoiceCount} đơn</small></td><td>{formatNumber(item.quantity)}</td><td><strong>{money(item.revenue)}</strong><i><span style={{ width: `${Math.max(4, (itemMode==='quantity'?item.quantity:item.revenue) / maxItemMetric * 100)}%` }} /></i></td></tr>)}</tbody></table></div></article>
           <article className="analyst-card"><CardTitle icon="◴" title="Customer Insights" subtitle="Hành vi mua và giờ bán trong kỳ lọc" /><div className="analyst-mini-kpis"><Mini label="Giá trị đơn TB" value={money(data.overview.averageOrderValue)} /><Mini label="Quy mô giỏ" value={`${data.overview.basketSize.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} món`} /><Mini label="Giờ vàng" value={peak ? `${peak.hour}h` : '—'} /></div><div className="analyst-chart analyst-hour-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={data.hourly}><CartesianGrid stroke="#edf1f6" vertical={false}/><XAxis dataKey="hour" tickFormatter={(value) => `${value}h`} tickLine={false}/><YAxis axisLine={false} tickLine={false}/><Tooltip formatter={(value) => `${value} đơn`}/><Bar dataKey="invoices" radius={[8,8,0,0]}>{data.hourly.map((row) => <Cell key={row.hour} fill={row.hour === peak?.hour ? '#b832ee' : '#d9cffb'} />)}</Bar></BarChart></ResponsiveContainer></div></article>
         </section>
 

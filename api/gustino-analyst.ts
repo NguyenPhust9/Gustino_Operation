@@ -151,7 +151,7 @@ function summarize(invoices: any[]) {
     daily: [...daily].sort(([left], [right]) => left.localeCompare(right)).map(([date, row]) => ({ date, ...roundedRow(row) })),
     hourly: [...hourly].sort(([left], [right]) => left.localeCompare(right)).map(([hour, row]) => ({ hour, ...roundedRow(row) })),
     channels: [...channels].sort((a, b) => b[1].revenue - a[1].revenue).map(([name, row]) => ({ name, ...roundedRow(row) })),
-    topItems: [...items].sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 10).map(([name, row]) => ({
+    topItems: [...items].sort((a, b) => b[1].revenue - a[1].revenue).map(([name, row]) => ({
       name, quantity: round(row.quantity, 4), revenue: round(row.revenue), invoiceCount: row.invoiceIds.size,
     })),
   }
