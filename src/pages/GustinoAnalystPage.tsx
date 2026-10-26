@@ -24,6 +24,9 @@ interface FinancialConfig {
   fixed_cost: number
   gross_margin_rate: number
   kpi_target: number | null
+  tier_1_rate: number
+  tier_2_rate: number
+  tier_3_rate: number
 }
 
 const COLORS = ['#2d9cdb', '#8b5cf6', '#6366f1', '#10b981', '#f59e0b', '#94a3b8']
@@ -56,7 +59,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         const periodMonth = `${from.slice(0, 7)}-01`
         const configResult = await supabase
           ?.from('analytics_financial_configs')
-          .select('period_month,fixed_cost,gross_margin_rate,kpi_target')
+          .select('period_month,fixed_cost,gross_margin_rate,kpi_target,tier_1_rate,tier_2_rate,tier_3_rate')
           .eq('period_month', periodMonth)
           .maybeSingle()
         if (active) {
@@ -79,6 +82,11 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const breakEvenRevenue = financialConfig && financialConfig.gross_margin_rate > 0
     ? financialConfig.fixed_cost / financialConfig.gross_margin_rate
     : null
+  const kpiProgress = financialConfig?.kpi_target && data ? data.overview.revenue / financialConfig.kpi_target : null
+  const periodTiming = monthTiming(to)
+  const forecastProgress = kpiProgress === null ? null : kpiProgress / periodTiming.elapsedRate
+  const paceGap = kpiProgress === null ? null : periodTiming.elapsedRate - kpiProgress
+  const breakEvenProgress = financialConfig?.kpi_target && breakEvenRevenue !== null ? breakEvenRevenue / financialConfig.kpi_target : null
 
   if (user.role !== 'admin') return <div className="analyst-state error">Chỉ Admin được xem Gustino Analyst.</div>
 
@@ -105,6 +113,19 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
           <KpiCard tone="orange" label="Đơn hàng" value={data.overview.invoiceCount.toLocaleString('vi-VN')} detail={`TB/đơn ${money(data.overview.averageOrderValue)} · loại ${data.overview.cancelledCount} đơn hủy`} />
           <KpiCard tone="green" label="Quy mô giỏ hàng" value={`${data.overview.basketSize.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} món/đơn`} detail={peak ? `Giờ đông nhất ${peak.hour}:00 · ${peak.invoices} đơn` : 'Chưa có dữ liệu giờ'} />
         </section>
+
+        {financialConfig?.kpi_target && kpiProgress !== null && <section className="analyst-progress-card">
+          <div className="analyst-progress-summary"><b>◎</b><span>Hoàn thành KPI<strong>{formatPercent(kpiProgress, 1)}</strong></span><em>{breakEvenRevenue !== null && data.overview.revenue >= breakEvenRevenue ? 'Đạt hòa vốn' : 'Dưới hòa vốn'}</em></div>
+          <p>⏱ Đã qua {formatPercent(periodTiming.elapsedRate)} thời gian, đạt {formatPercent(kpiProgress)} KPI – {paceGap !== null && paceGap > 0 ? `chậm hơn tiến độ ${Math.round(paceGap * 100)} điểm` : 'đúng hoặc nhanh hơn tiến độ'}. Dự báo cuối kỳ <strong>{formatPercent(forecastProgress || 0)} KPI</strong> (vạch đứt).</p>
+          <div className="analyst-goal-scale">
+            <div className="analyst-goal-track"><i style={{ width: scalePosition(kpiProgress) }} /><span className="forecast" style={{ left: scalePosition(forecastProgress || 0) }} /></div>
+            {breakEvenProgress !== null && <GoalMarker tone="break-even" left={scalePosition(breakEvenProgress)} label={`Hòa vốn ${formatPercent(breakEvenProgress)}`} />}
+            <GoalMarker left={scalePosition(financialConfig.tier_1_rate)} label={`${formatPercent(financialConfig.tier_1_rate)} Bậc 1`} />
+            <GoalMarker left={scalePosition(financialConfig.tier_2_rate)} label={`${formatPercent(financialConfig.tier_2_rate)} Bậc 2`} />
+            <GoalMarker left={scalePosition(financialConfig.tier_3_rate)} label={`${formatPercent(financialConfig.tier_3_rate)} Bậc 3`} />
+          </div>
+          <div className="analyst-time-progress"><span>◷ Thời gian</span><i><b style={{ width: `${Math.min(100, periodTiming.elapsedRate * 100)}%` }} /></i><strong>{periodTiming.elapsedDays}/{periodTiming.totalDays} ngày</strong></div>
+        </section>}
 
         <section className="analyst-grid analyst-grid-main">
           <article className="analyst-card analyst-chart-card"><CardTitle icon="⌁" title="Doanh thu theo ngày" subtitle="Tổng thanh toán của hóa đơn đã thu tiền" />
@@ -135,11 +156,15 @@ function KpiCard({ tone, label, value, detail }: { tone: string; label: string; 
 function CardTitle({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) { return <header className="analyst-card-title"><b>{icon}</b><div><h2>{title}</h2><p>{subtitle}</p></div></header> }
 function Insight({ tone, title, children }: { tone: string; title: string; children: ReactNode }) { return <div className={`analyst-insight ${tone}`}><strong>{title}</strong><p>{children}</p></div> }
 function Mini({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div> }
+function GoalMarker({ left, label, tone = '' }: { left: string; label: string; tone?: string }) { return <span className={`analyst-goal-marker ${tone}`} style={{ left }}><b>{label}</b></span> }
 function money(value: number) { return `${Math.round(value).toLocaleString('vi-VN')}đ` }
 function compactMoney(value: number) { return value >= 1_000_000 ? `${(value / 1_000_000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} tr` : money(value) }
 function formatNumber(value: number) { return value.toLocaleString('vi-VN', { maximumFractionDigits: 2 }) }
 function percent(value: number, total: number) { return total ? `${Math.round(value / total * 100)}%` : '0%' }
 function percentRate(value: number) { return `${(value * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}%` }
+function formatPercent(value: number, digits = 0) { return `${(value * 100).toLocaleString('vi-VN', { maximumFractionDigits: digits })}%` }
+function scalePosition(value: number) { return `${Math.max(0, Math.min(100, value / 1.2 * 100))}%` }
 function formatDate(value: string) { const [year, month, day] = value.slice(0,10).split('-'); return `${day}/${month}/${year}` }
 function formatDateTime(value: string) { return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) }
 function currentMonthRange() { const now = new Date(); const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }); const to = formatter.format(now); return { from: `${to.slice(0, 7)}-01`, to } }
+function monthTiming(value: string) { const [year, month, day] = value.split('-').map(Number); const totalDays = new Date(Date.UTC(year, month, 0)).getUTCDate(); const elapsedDays = Math.min(day, totalDays); return { elapsedDays, totalDays, elapsedRate: elapsedDays / totalDays } }
