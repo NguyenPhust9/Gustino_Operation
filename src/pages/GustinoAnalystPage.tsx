@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { supabase } from '../lib/supabase'
@@ -27,6 +27,7 @@ interface FinancialConfig {
   tier_1_rate: number
   tier_2_rate: number
   tier_3_rate: number
+  branch_break_even: Record<string, number>
 }
 
 const COLORS = ['#2d9cdb', '#8b5cf6', '#6366f1', '#10b981', '#f59e0b', '#94a3b8']
@@ -41,6 +42,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reloadTick, setReloadTick] = useState(0)
+  const [revenueMode, setRevenueMode] = useState<'daily' | 'cumulative'>('daily')
 
   useEffect(() => {
     if (user.role !== 'admin') return
@@ -59,7 +61,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         const periodMonth = `${from.slice(0, 7)}-01`
         const configResult = await supabase
           ?.from('analytics_financial_configs')
-          .select('period_month,fixed_cost,gross_margin_rate,kpi_target,tier_1_rate,tier_2_rate,tier_3_rate')
+          .select('period_month,fixed_cost,gross_margin_rate,kpi_target,tier_1_rate,tier_2_rate,tier_3_rate,branch_break_even')
           .eq('period_month', periodMonth)
           .maybeSingle()
         if (active) {
@@ -87,6 +89,8 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const forecastProgress = kpiProgress === null ? null : kpiProgress / periodTiming.elapsedRate
   const paceGap = kpiProgress === null ? null : periodTiming.elapsedRate - kpiProgress
   const breakEvenProgress = financialConfig?.kpi_target && breakEvenRevenue !== null ? breakEvenRevenue / financialConfig.kpi_target : null
+  const revenueChart = useMemo(() => buildRevenueChart(data?.daily || [], from, to, financialConfig), [data, from, to, financialConfig])
+  const branchWarnings = (data?.branchRows || []).map((branch) => ({ ...branch, target: Number(financialConfig?.branch_break_even?.[branch.code] || 0) })).filter((branch) => branch.target > branch.revenue)
 
   if (user.role !== 'admin') return <div className="analyst-state error">Chỉ Admin được xem Gustino Analyst.</div>
 
@@ -128,13 +132,15 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
         </section>}
 
         <section className="analyst-grid analyst-grid-main">
-          <article className="analyst-card analyst-chart-card"><CardTitle icon="⌁" title="Doanh thu theo ngày" subtitle="Tổng thanh toán của hóa đơn đã thu tiền" />
-            <div className="analyst-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data.daily}><defs><linearGradient id="analystRevenue" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a855f7" stopOpacity={0.38}/><stop offset="100%" stopColor="#a855f7" stopOpacity={0.02}/></linearGradient></defs><CartesianGrid stroke="#e8edf5" vertical={false}/><XAxis dataKey="date" tickFormatter={(value) => value.slice(8, 10)} tickLine={false}/><YAxis tickFormatter={compactMoney} tickLine={false} axisLine={false}/><Tooltip formatter={(value) => money(Number(value))} labelFormatter={(value) => formatDate(String(value))}/><Area type="monotone" dataKey="revenue" stroke="#a43cf3" strokeWidth={4} fill="url(#analystRevenue)" /></AreaChart></ResponsiveContainer></div>
+          <article className="analyst-card analyst-chart-card"><div className="analyst-chart-head"><CardTitle icon="⌁" title="Doanh thu theo ngày" subtitle="So với mốc KPI ngày và hòa vốn ngày" /><div><button className={revenueMode==='daily'?'active':''} onClick={()=>setRevenueMode('daily')}>Theo ngày</button><button className={revenueMode==='cumulative'?'active':''} onClick={()=>setRevenueMode('cumulative')}>Lũy kế</button></div></div>
+            <div className="analyst-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={revenueChart}><CartesianGrid stroke="#e8edf5" vertical={false}/><XAxis dataKey="date" tickFormatter={(value) => value.slice(8, 10)} tickLine={false}/><YAxis tickFormatter={compactMoney} tickLine={false} axisLine={false}/><Tooltip formatter={(value) => money(Number(value))} labelFormatter={(value) => formatDate(String(value))}/><Area type="monotone" dataKey={revenueMode==='daily'?'revenue':'cumulative'} stroke="#a43cf3" strokeWidth={4} fill="#a855f722" /><Line type="monotone" dataKey={revenueMode==='daily'?'kpiDaily':'kpiCumulative'} stroke="#10b981" strokeDasharray="7 6" dot={false}/><Line type="monotone" dataKey={revenueMode==='daily'?'breakEvenDaily':'breakEvenCumulative'} stroke="#fb3f68" strokeDasharray="5 5" dot={false}/></AreaChart></ResponsiveContainer></div>
           </article>
           <article className="analyst-card analyst-insights"><CardTitle icon="✦" title="Trợ lý dữ liệu" subtitle="Nhận định được tính từ kỳ đang lọc" />
             <Insight tone="danger" title="Kiểm soát hóa đơn">Đã loại {data.overview.cancelledCount} hóa đơn hủy. Doanh thu chỉ cộng hóa đơn có trạng thái đã thu tiền.</Insight>
             <Insight tone="warning" title="Giờ cao điểm">{peak ? `${peak.hour}:00–${String(Number(peak.hour) + 1).padStart(2, '0')}:00 có ${peak.invoices} đơn.` : 'Chưa đủ dữ liệu.'} {peakRevenue ? `Khung doanh thu cao nhất là ${peakRevenue.hour}:00 với ${money(peakRevenue.revenue)}.` : ''}</Insight>
             <Insight tone="success" title="Chất lượng dữ liệu">Dữ liệu được tải lại từ CUKCUK khi đổi bộ lọc hoặc nhấn Cập nhật; không dùng số doanh thu viết cứng trong giao diện.</Insight>
+            {financialConfig && breakEvenRevenue !== null && <Insight tone="danger" title="Cảnh báo dòng tiền">Doanh thu {money(data.overview.revenue)} đạt {formatPercent(data.overview.revenue / breakEvenRevenue)} hòa vốn, còn thiếu {money(Math.max(0, breakEvenRevenue-data.overview.revenue))}. Cần bình quân {money(Math.max(0, breakEvenRevenue-data.overview.revenue)/Math.max(1,periodTiming.totalDays-periodTiming.elapsedDays))}/ngày trong {Math.max(0,periodTiming.totalDays-periodTiming.elapsedDays)} ngày còn lại.</Insight>}
+            {branchWarnings.length > 0 && <Insight tone="danger" title="Chi nhánh dưới hòa vốn">{branchWarnings.map((branch)=>`${branch.name} (${formatPercent(branch.revenue/branch.target)}, thiếu ${money(branch.target-branch.revenue)})`).join('; ')}.</Insight>}
           </article>
         </section>
 
@@ -168,3 +174,9 @@ function formatDate(value: string) { const [year, month, day] = value.slice(0,10
 function formatDateTime(value: string) { return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) }
 function currentMonthRange() { const now = new Date(); const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }); const to = formatter.format(now); return { from: `${to.slice(0, 7)}-01`, to } }
 function monthTiming(value: string) { const [year, month, day] = value.split('-').map(Number); const totalDays = new Date(Date.UTC(year, month, 0)).getUTCDate(); const elapsedDays = Math.min(day, totalDays); return { elapsedDays, totalDays, elapsedRate: elapsedDays / totalDays } }
+function buildRevenueChart(rows: AnalystPayload['daily'], from: string, to: string, config: FinancialConfig | null) {
+  const byDate = new Map(rows.map((row) => [row.date, row.revenue])); const result = []; let cumulative = 0
+  const start = new Date(`${from}T00:00:00Z`), end = new Date(`${to}T00:00:00Z`); const days = Math.max(1, Math.round((end.getTime()-start.getTime())/86400000)+1)
+  for (let date = new Date(start), index = 1; date <= end; date.setUTCDate(date.getUTCDate()+1), index++) { const key=date.toISOString().slice(0,10); const revenue=byDate.get(key)||0; cumulative+=revenue; const kpiDaily=Number(config?.kpi_target||0)/days; const breakEvenDaily=(config ? config.fixed_cost/config.gross_margin_rate : 0)/days; result.push({date:key,revenue,cumulative,kpiDaily,kpiCumulative:kpiDaily*index,breakEvenDaily,breakEvenCumulative:breakEvenDaily*index}) }
+  return result
+}
