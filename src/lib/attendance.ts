@@ -7,7 +7,7 @@ import {
   type AttendanceOutboxDurability,
   type AttendanceOutboxOp,
 } from './attendanceOutbox'
-import { hasSystemWideScope, isBranchlessRole } from './access'
+import { hasSystemWideScope, isBranchlessRole, isRoamingStaffIdentity } from './access'
 import { detectDeviceEnvironment } from './deviceReadiness'
 import { branchIds, branchName } from './branches'
 import { localDateKey } from './dates'
@@ -105,7 +105,7 @@ function queryString(filters: AttendanceFilters) {
 
 export function permittedBranchIds(user: AppUser) {
   // SUP MT là vai trò giám sát/đối chiếu toàn hệ thống — xem được mọi chi nhánh như admin.
-  if (hasSystemWideScope(user.role) || user.canRoamBranches) return branchIds()
+  if (hasSystemWideScope(user.role) || user.canRoamBranches || isRoamingStaffIdentity(user)) return branchIds()
   if (user.role === 'manager' || user.role === 'kitchen') {
     const scopedIds = Array.from(new Set([user.branchId, ...(user.branchIds || [])].filter(Boolean)))
     return scopedIds.length ? scopedIds : branchIds()
@@ -719,6 +719,9 @@ export async function createShiftRegistration(
     await attendanceApi(user, '/registrations', { method: 'POST', body: JSON.stringify(registration) })
     return registration
   }
+  if ((user.canRoamBranches || isRoamingStaffIdentity(user)) && registration.branchId && registration.branchId !== user.branchId) {
+    await supabase!.rpc('switch_my_active_branch', { p_branch_id: registration.branchId })
+  }
   const safeRpc = await supabase!.rpc('add_shift_registration_safe', {
     p_user_id: registration.userId,
     p_branch_id: registration.branchId,
@@ -813,6 +816,9 @@ export async function createManualShiftRegistration(
     if (input.userId !== actor.id && !managesBranch) throw new Error('Máy chủ local chỉ hỗ trợ nhân viên tự thêm ca của mình.')
     await attendanceApi(actor, '/registrations', { method: 'POST', body: JSON.stringify(registration) })
     return registration
+  }
+  if ((actor.canRoamBranches || isRoamingStaffIdentity(actor)) && input.branchId && input.branchId !== actor.branchId) {
+    await supabase!.rpc('switch_my_active_branch', { p_branch_id: input.branchId })
   }
   const result = await supabase!.rpc('add_manual_shift_registration', {
     p_user_id: input.userId,
@@ -1036,6 +1042,9 @@ export async function setScheduleRegistration(
         endTime,
       }),
     })
+  }
+  if ((user.canRoamBranches || isRoamingStaffIdentity(user)) && input.branchId && input.branchId !== user.branchId) {
+    await supabase!.rpc('switch_my_active_branch', { p_branch_id: input.branchId })
   }
   const safeCell = await supabase!.rpc('set_schedule_registration_safe', {
     p_user_id: input.userId,

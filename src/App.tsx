@@ -10,7 +10,7 @@ import { LauncherPage } from './pages/LauncherPage'
 import { LoginPage } from './pages/LoginPage'
 import type { AdminSection } from './pages/AdminPage'
 import { adminRouteForSection, adminSectionForRoute } from './pages/admin/routeMap'
-import { canOpenAdminConsole, canUseAdmin, canUseKitchen, canUseManagement, canUseOperations, canUseSales, hasSystemWideScope, normalizeRole } from './lib/access'
+import { canOpenAdminConsole, canUseAdmin, canUseKitchen, canUseManagement, canUseOperations, canUseSales, hasSystemWideScope, isRoamingStaffIdentity, normalizeRole } from './lib/access'
 import { clearSessionStart, markSessionStart, sessionOverdueMs, setSessionExpiredNotice } from './lib/sessionExpiry'
 import { fetchConfiguredProducts, subscribeConfiguredProducts } from './lib/products'
 import { canReceivePayslip } from './lib/payroll'
@@ -45,7 +45,13 @@ function App() {
   const [user, setUser] = useState<AppUser | null>(() => {
     const saved = loadLocalUser()
     if (saved?.authToken && supabase && !shouldUseLanApi(saved)) return null
-    return saved ? { ...saved, role: normalizeRole(saved.role) } : null
+    return saved
+      ? {
+          ...saved,
+          role: normalizeRole(saved.role),
+          canRoamBranches: Boolean(saved.canRoamBranches) || isRoamingStaffIdentity(saved),
+        }
+      : null
   })
   const [page, setPage] = useState<Page>(() => pageFromHash())
   const [authReady, setAuthReady] = useState(!supabase)
@@ -343,7 +349,10 @@ function App() {
         .maybeSingle()
       if (!active || error) return
       const role = normalizeRole((profile?.role || user.role) as AppUser['role'])
-      const canRoamBranches = Boolean(profile?.can_roam_branches)
+      const canRoamBranches = Boolean(profile?.can_roam_branches) || isRoamingStaffIdentity({
+        name: user.name,
+        email: user.email,
+      })
       let branchId = profile?.branch_id || user.branchId
       let blocked = !profile || profile.active === false
       if (!blocked && (role === 'staff' || role === 'shift_leader' || role === 'cashier' || canRoamBranches)) {

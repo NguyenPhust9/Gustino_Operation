@@ -63,8 +63,24 @@ export function isBranchlessRole(role: Role) {
   return role === 'manager' || role === 'kitchen' || role === 'supmt'
 }
 
-export function canSwitchWorkingBranch(user?: { role: Role; canRoamBranches?: boolean }) {
-  return Boolean(user?.canRoamBranches)
+export function canSwitchWorkingBranch(user?: { role: Role; canRoamBranches?: boolean; name?: string; email?: string }) {
+  return Boolean(user?.canRoamBranches) || isRoamingStaffIdentity(user)
+}
+
+export function isRoamingStaffIdentity(input?: {
+  canRoamBranches?: boolean | null
+  name?: string | null
+  full_name?: string | null
+  email?: string | null
+} | null) {
+  if (!input) return false
+  if (input.canRoamBranches) return true
+  const raw = `${input.name || ''} ${input.full_name || ''} ${input.email || ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+  return raw.includes('thao vy') || raw.includes('thaovy')
 }
 
 export function normalizeRole(role: Role): Role {

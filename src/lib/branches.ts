@@ -123,7 +123,7 @@ export async function fetchConfiguredBranchRows(user?: AppUser): Promise<ConfigB
 
 function userBranchScope(user?: AppUser) {
   if (!user) return null
-  if (user.role === 'admin') return null
+  if (user.role === 'admin' || user.role === 'supmt' || user.canRoamBranches) return null
   const ids = userBranchIds(user)
   return ids.length ? ids : null
 }
@@ -293,7 +293,7 @@ export function useConfiguredBranches(options: { includeInactive?: boolean; user
       window.removeEventListener('storage', refresh)
       if (channel) void supabase?.removeChannel(channel)
     }
-  }, [options.includeInactive, options.user?.id, options.user?.authToken])
+  }, [options.includeInactive, options.user?.id, options.user?.role, options.user?.canRoamBranches, (options.user?.branchIds || []).join(','), options.user?.authToken])
 
   return branches
 }

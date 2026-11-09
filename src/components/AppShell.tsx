@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useRef } from 'react'
-import { canOpenAdminConsole, canUseAdmin, canUseKitchen, canUseManagement, canUseOperations, canUseSales, displayUserName, roleLabel } from '../lib/access'
+import { canOpenAdminConsole, canUseAdmin, canUseKitchen, canUseManagement, canUseOperations, canUseSales, displayUserName, isRoamingStaffIdentity, roleLabel } from '../lib/access'
 import { toggleLang, useLang } from '../lib/i18n'
 import { heartbeatActiveUser } from '../lib/activeUsers'
 import {
@@ -241,7 +241,7 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
   const [switchingBranch, setSwitchingBranch] = useState(false)
   const configuredBranches = useConfiguredBranches({ user })
   const roamingBranches = configuredBranches.filter((branch) => branch.id !== 'central-kitchen')
-  const canSwitchBranch = Boolean(user.canRoamBranches) && roamingBranches.length > 0
+  const canSwitchBranch = (Boolean(user.canRoamBranches) || isRoamingStaffIdentity(user)) && roamingBranches.length > 0
 
   async function handleSwitchWorkingBranch(nextBranchId: string) {
     if (!nextBranchId || nextBranchId === user.branchId || switchingBranch) return

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { AppUser, Role } from '../types'
-import { normalizeRole } from '../lib/access'
+import { isRoamingStaffIdentity, normalizeRole } from '../lib/access'
 import { usernameToEmail } from '../lib/authIdentity'
 import { consumeSessionExpiredNotice } from '../lib/sessionExpiry'
 import { AppFooter } from '../components/AppFooter'
@@ -60,7 +60,10 @@ export function LoginPage({ onLogin }: Props) {
           throw new Error('Tài khoản này đã bị khóa hoặc chưa được cấp hồ sơ nhân sự.')
         }
         const role = normalizeRole((profile?.role || metadata.role || 'shift_leader') as Role)
-        const canRoamBranches = Boolean(profile?.can_roam_branches)
+        const canRoamBranches = Boolean(profile?.can_roam_branches) || isRoamingStaffIdentity({
+          name: profile?.full_name || metadata.full_name || username,
+          email,
+        })
         let profileBranchId = profile?.branch_id || metadata.branch_id || branchId
         let branchIds: string[] = []
         // SUP MT (giám sát) hoặc nhân sự lưu động (canRoamBranches) thấy mọi chi nhánh active.

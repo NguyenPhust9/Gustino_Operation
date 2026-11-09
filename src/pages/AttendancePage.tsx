@@ -41,7 +41,7 @@ import {
 } from '../lib/shiftAutoOpen'
 import { shouldUseLanApi, supabase, uniqueChannelName } from '../lib/supabase'
 import { addLocalDateKeyDays, localDateKey, localDateKeyWeekday, VN_UTC_OFFSET } from '../lib/dates'
-import { employeePositionLabel, hasSystemWideScope, roleLabel as accessRoleLabel } from '../lib/access'
+import { employeePositionLabel, hasSystemWideScope, isRoamingStaffIdentity, roleLabel as accessRoleLabel } from '../lib/access'
 import { useLang } from '../lib/i18n'
 import { createAttendanceAdjustment } from '../lib/attendanceAdjustments'
 import { ATTENDANCE_OUTBOX_EVENT, inspectAttendanceOutbox, type AttendanceOutboxOp } from '../lib/attendanceOutbox'
@@ -509,7 +509,8 @@ function SchedulePanel({
     setBusyPhase('locating')
     try {
       let activeUser = user
-      if (user.canRoamBranches && registration.branchId && registration.branchId !== user.branchId) {
+      const isCurrentUserRoaming = Boolean(user.canRoamBranches) || isRoamingStaffIdentity(user)
+      if (isCurrentUserRoaming && registration.branchId && registration.branchId !== user.branchId) {
         const switchedBranch = await switchActiveBranch(user, registration.branchId)
         activeUser = { ...user, branchId: switchedBranch }
       }
@@ -990,7 +991,7 @@ function AttendanceAdjustmentForm({ user, onFeedback }: {
  * đúng chi nhánh của mình như cũ.
  */
 function attendanceBranchOptions(user: AppUser) {
-  if (hasSystemWideScope(user.role) || user.role === 'manager' || user.canRoamBranches) return permittedBranchIds(user)
+  if (hasSystemWideScope(user.role) || user.role === 'manager' || user.canRoamBranches || isRoamingStaffIdentity(user)) return permittedBranchIds(user)
   return [user.branchId]
 }
 
@@ -1003,8 +1004,11 @@ function RegistrationPanel({
   onChanged: () => Promise<void>
   onFeedback: (message: string) => void
 }) {
-  const branchIds = attendanceBranchOptions(user)
   const branches = useConfiguredBranches({ user })
+  const canRoam = Boolean(user.canRoamBranches) || isRoamingStaffIdentity(user) || hasSystemWideScope(user.role)
+  const branchIds = canRoam
+    ? branches.filter((item) => item.id !== 'central-kitchen').map((item) => item.id)
+    : attendanceBranchOptions(user)
   const [branchId, setBranchId] = useState(user.branchId || branchIds[0] || '')
   const [workDate, setWorkDate] = useState(localDateKey())
   const [shiftId, setShiftId] = useState('')
@@ -1086,7 +1090,7 @@ function RegistrationPanel({
               const nextBranch = event.target.value
               setBranchId(nextBranch)
               setShiftId('')
-              if (user.canRoamBranches) void switchActiveBranch(user, nextBranch).catch(() => undefined)
+              if (user.canRoamBranches || isRoamingStaffIdentity(user)) void switchActiveBranch(user, nextBranch).catch(() => undefined)
             }}>
               {branches.filter((item) => branchIds.includes(item.id)).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
@@ -1176,8 +1180,11 @@ function SharedScheduleBoard({
     setFrom(isScheduleManager ? registrationWeekStartKey() : localDateKey())
   }
   const canSetupShifts = canManageShiftSetup(user)
-  const branchIds = isScheduleManager ? permittedBranchIds(user) : attendanceBranchOptions(user)
   const branches = useConfiguredBranches({ user })
+  const canRoam = Boolean(user.canRoamBranches) || isRoamingStaffIdentity(user) || hasSystemWideScope(user.role)
+  const branchIds = canRoam
+    ? branches.filter((item) => item.id !== 'central-kitchen').map((item) => item.id)
+    : (isScheduleManager ? permittedBranchIds(user) : attendanceBranchOptions(user))
   const branchShifts = shifts.filter((shift) => shift.branchId === branchId)
   const fallbackShiftOptions: WorkShift[] = DEFAULT_WORK_SHIFT_TEMPLATES.map((template, index) => ({
     id: `${FALLBACK_SHIFT_PREFIX}${index}`,
@@ -1225,9 +1232,10 @@ function SharedScheduleBoard({
   const mergedPeople = useMemo(() => {
     const byProfile = new Map<string, SchedulePerson>()
     const unlinked: SchedulePerson[] = []
+    const isCurrentUserRoaming = Boolean(user.canRoamBranches) || isRoamingStaffIdentity(user)
     for (const person of people) {
       if (person.profileId) {
-        const isCurrentRoamingUser = person.profileId === user.id && (hasSystemWideScope(user.role) || Boolean(user.canRoamBranches))
+        const isCurrentRoamingUser = person.profileId === user.id && (hasSystemWideScope(user.role) || isCurrentUserRoaming)
         byProfile.set(person.profileId, isCurrentRoamingUser ? { ...person, branchId } : person)
       } else {
         unlinked.push(person)
@@ -1241,7 +1249,7 @@ function SharedScheduleBoard({
         name: user.name,
         // SUP MT/admin hoặc nhân sự lưu động: gắn theo chi nhánh đang xem để dòng
         // của chính họ không bị lọc mất (bảng lịch lọc theo `person.branchId === branchId`).
-        branchId: (hasSystemWideScope(user.role) || user.canRoamBranches) ? branchId : (user.branchId || branchId),
+        branchId: (hasSystemWideScope(user.role) || isCurrentUserRoaming) ? branchId : (user.branchId || branchId),
         employmentType: user.employmentType,
         positionTitle: user.positionTitle,
         active: true,
@@ -1599,7 +1607,7 @@ function SharedScheduleBoard({
             <select value={branchId} disabled={branchIds.length === 1} onChange={(event) => {
               const nextBranch = event.target.value
               setBranchId(nextBranch)
-              if (user.canRoamBranches) void switchActiveBranch(user, nextBranch).catch(() => undefined)
+              if (user.canRoamBranches || isRoamingStaffIdentity(user)) void switchActiveBranch(user, nextBranch).catch(() => undefined)
             }}>
               {branches.filter((branch) => branchIds.includes(branch.id)).map((branch) =>
                 <option key={branch.id} value={branch.id}>{branch.name}</option>,
