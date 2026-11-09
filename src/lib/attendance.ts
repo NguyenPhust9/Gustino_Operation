@@ -105,7 +105,7 @@ function queryString(filters: AttendanceFilters) {
 
 export function permittedBranchIds(user: AppUser) {
   // SUP MT là vai trò giám sát/đối chiếu toàn hệ thống — xem được mọi chi nhánh như admin.
-  if (hasSystemWideScope(user.role)) return branchIds()
+  if (hasSystemWideScope(user.role) || user.canRoamBranches) return branchIds()
   if (user.role === 'manager' || user.role === 'kitchen') {
     const scopedIds = Array.from(new Set([user.branchId, ...(user.branchIds || [])].filter(Boolean)))
     return scopedIds.length ? scopedIds : branchIds()
@@ -181,22 +181,23 @@ export async function fetchEmployees(user: AppUser, options: { includeInactive?:
   const branches = permittedBranchIds(user)
   const activeBranches = await activeBranchIdSet(user, options.readContext)
   const client = supabase!
-  let query = client.from('profiles').select('id, full_name, email, role, branch_id, active, employment_type, position_title, avatar_url, employment_status, employment_start_date, probation_end_date, employment_end_date, employment_note').order('full_name')
+  let query = client.from('profiles').select('id, full_name, email, role, branch_id, can_roam_branches, active, employment_type, position_title, avatar_url, employment_status, employment_start_date, probation_end_date, employment_end_date, employment_note').order('full_name')
   if (!options.includeInactive) query = query.eq('active', true)
   // Vai trò toàn hệ thống (admin, SUP MT) không lọc theo chi nhánh: lọc `branch_id in (...)`
   // sẽ cắt mất chính các tài khoản không gắn chi nhánh (quản lý, bếp, giám sát).
-  if (!hasSystemWideScope(user.role)) query = query.in('branch_id', branches)
+  if (!hasSystemWideScope(user.role) && !user.canRoamBranches) query = query.in('branch_id', branches)
   let { data, error } = await query as { data: any[] | null; error: any }
   if (error) throw error
   const rows = options.includeInactive
     ? (data || [])
-    : (data || []).filter((row) => row.role === 'admin' || isBranchlessRole(row.role) || isActiveBranch(row.branch_id, activeBranches))
+    : (data || []).filter((row) => row.role === 'admin' || isBranchlessRole(row.role) || Boolean(row.can_roam_branches) || isActiveBranch(row.branch_id, activeBranches))
   return rows.map((row) => ({
     id: row.id,
     name: row.full_name,
     email: row.email || undefined,
     role: row.role,
     branchId: row.branch_id || undefined,
+    canRoamBranches: Boolean(row.can_roam_branches),
     active: row.active !== false,
     hasLoginAccount: Boolean(row.email),
     employmentType: row.employment_type || undefined,
@@ -208,6 +209,51 @@ export async function fetchEmployees(user: AppUser, options: { includeInactive?:
     employmentEndDate: row.employment_end_date || undefined,
     employmentNote: row.employment_note || '',
   }))
+}
+
+export async function switchActiveBranch(user: AppUser, nextBranchId: string): Promise<string> {
+  const targetBranchId = nextBranchId.trim()
+  if (!targetBranchId) throw new Error('Vui lòng chọn chi nhánh làm việc hợp lệ.')
+  let resolvedBranchId = targetBranchId
+  if (supabase && !shouldUseAttendanceApi(user)) {
+    const { data, error } = await supabase.rpc('switch_my_active_branch', {
+      p_branch_id: targetBranchId,
+    })
+    if (error) throw new Error(error.message || 'Không thể chuyển chi nhánh làm việc.')
+    if (typeof data === 'string' && data.trim()) {
+      resolvedBranchId = data.trim()
+    }
+  }
+  const allBranches = branchIds()
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gustino:user-profile-updated', {
+      detail: {
+        id: user.id,
+        branchId: resolvedBranchId,
+        branchIds: allBranches.length ? allBranches : [resolvedBranchId],
+        canRoamBranches: true,
+      },
+    }))
+    window.dispatchEvent(new CustomEvent('gustino-attendance-updated'))
+  }
+  return resolvedBranchId
+}
+
+export async function updateEmployeeRoaming(
+  user: AppUser,
+  employeeId: string,
+  canRoamBranches: boolean,
+): Promise<boolean> {
+  if (user.role !== 'admin') throw new Error('Chỉ Admin mới được cấp quyền di chuyển đa chi nhánh.')
+  if (!supabase || shouldUseAttendanceApi(user)) {
+    throw new Error('Cần kết nối Supabase để cập nhật quyền đa chi nhánh.')
+  }
+  const { data, error } = await supabase.rpc('admin_set_employee_roaming', {
+    p_employee_id: employeeId,
+    p_can_roam: canRoamBranches,
+  })
+  if (error) throw new Error(error.message || 'Không thể cập nhật quyền di chuyển đa chi nhánh.')
+  return Boolean(data)
 }
 
 export async function updateEmployeeCrmDetails(

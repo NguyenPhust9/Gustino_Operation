@@ -18,6 +18,7 @@ import {
   updateAttendanceRecordByAdmin,
   updateEmployeeDetails,
   updateEmployeeCrmDetails,
+  updateEmployeeRoaming,
   updateEmployeeRole,
 } from '../lib/attendance'
 import { formatDecimalHoursAsDuration, formatWorkDurationBetween } from '../lib/workDuration'
@@ -3805,6 +3806,30 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
                           </label>
                           <label>Vị trí<input value={employeeDraft(employee).positionTitle} disabled={employee.active === false || savingEmployeeDetailsId === employee.id} onChange={(event) => updateEmployeeDraft(employee, { positionTitle: event.target.value })} /></label>
                           <label>Ảnh đại diện<input type="file" accept="image/*" disabled={employee.active === false || savingEmployeeDetailsId === employee.id} onChange={(event) => void updateEmployeeAvatar(employee, event.target.files?.[0])} /></label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(employee.canRoamBranches)}
+                              disabled={employee.active === false || savingEmployeeDetailsId === employee.id}
+                              onChange={async (event) => {
+                                const nextCanRoam = event.target.checked
+                                setSavingEmployeeDetailsId(employee.id)
+                                setError('')
+                                setFeedback('')
+                                try {
+                                  await updateEmployeeRoaming(user, employee.id, nextCanRoam)
+                                  setEmployees((items) => items.map((item) => item.id === employee.id ? { ...item, canRoamBranches: nextCanRoam } : item))
+                                  setFeedback(`Đã ${nextCanRoam ? 'bật' : 'tắt'} quyền di chuyển đa chi nhánh cho ${employee.name}.`)
+                                } catch (reason) {
+                                  setError(reason instanceof Error ? reason.message : 'Không thể cập nhật quyền di chuyển đa chi nhánh.')
+                                } finally {
+                                  setSavingEmployeeDetailsId('')
+                                }
+                              }}
+                              style={{ width: 16, height: 16 }}
+                            />
+                            <span>Cho phép di chuyển đa chi nhánh (lưu động giữa các điểm bán)</span>
+                          </label>
                           <button type="button" className="primary-button" disabled={employee.active === false || savingEmployeeDetailsId === employee.id} onClick={() => void saveEmployeeDetails(employee)}>
                             {savingEmployeeDetailsId === employee.id ? 'Đang lưu…' : 'Lưu hồ sơ'}
                           </button>

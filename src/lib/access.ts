@@ -63,6 +63,10 @@ export function isBranchlessRole(role: Role) {
   return role === 'manager' || role === 'kitchen' || role === 'supmt'
 }
 
+export function canSwitchWorkingBranch(user?: { role: Role; canRoamBranches?: boolean }) {
+  return Boolean(user?.canRoamBranches)
+}
+
 export function normalizeRole(role: Role): Role {
   return role
 }

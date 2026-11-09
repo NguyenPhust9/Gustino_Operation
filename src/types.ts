@@ -9,6 +9,7 @@ export interface AppUser {
   role: Role
   branchId: string
   branchIds?: string[]
+  canRoamBranches?: boolean
   authToken?: string
   employmentType?: EmploymentType
   positionTitle?: string
@@ -21,6 +22,7 @@ export interface EmployeeProfile {
   email?: string
   role: Role
   branchId?: string
+  canRoamBranches?: boolean
   active?: boolean
   hasLoginAccount?: boolean
   employmentType?: EmploymentType

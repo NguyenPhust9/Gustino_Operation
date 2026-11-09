@@ -146,7 +146,7 @@ export interface PersonalKpiRewardSummary {
  * cả LAN (trả dữ liệu chi nhánh) và Supabase (RLS trả dữ liệu cá nhân) cho cùng kết quả.
  */
 export function calculatePersonalKpiReward(
-  user: Pick<AppUser, 'id' | 'name' | 'role' | 'branchId' | 'employmentType' | 'positionTitle'>,
+  user: Pick<AppUser, 'id' | 'name' | 'role' | 'branchId' | 'canRoamBranches' | 'employmentType' | 'positionTitle'>,
   allocations: BagAllocation[],
   receipts: SalesReceipt[],
   from: string,
@@ -161,7 +161,7 @@ export function calculatePersonalKpiReward(
   }
 
   allocations.forEach((allocation) => {
-    if (allocation.branchId !== user.branchId) return
+    if (!user.canRoamBranches && allocation.branchId !== user.branchId) return
     if (allocation.employeeId ? allocation.employeeId !== user.id : !matchesName(allocation.employeeName)) return
     const date = allocation.businessDate || allocation.settledAt?.slice(0, 10) || allocation.issuedAt.slice(0, 10)
     const quantity = soldBagQuantity(allocation)
@@ -169,7 +169,7 @@ export function calculatePersonalKpiReward(
   })
 
   receipts.forEach((receipt) => {
-    if (receipt.branchId !== user.branchId) return
+    if (!user.canRoamBranches && receipt.branchId !== user.branchId) return
     if (receipt.sellerId ? receipt.sellerId !== user.id : !matchesName(receipt.sellerName)) return
     // Dòng đã gắn allocation đã được tính ở trên; chỉ cộng POS trực tiếp để
     // không nhân đôi doanh thu, giống hệt bảng Thi đua của quản lý.

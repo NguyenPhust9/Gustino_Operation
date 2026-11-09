@@ -9,6 +9,7 @@ import {
   fetchAttendanceRecords,
   fetchShiftRegistrations,
   fetchWorkShifts,
+  permittedBranchIds,
   withAttendanceReadDeadline,
   type AttendanceDetailRow,
 } from '../lib/attendance'
@@ -91,15 +92,16 @@ export function MyTimesheetPage({ user }: Props) {
       const { from, to } = monthBounds(month)
       // Mọi lệnh đọc phải có hạn chót cứng: supabase-js không tự timeout, một
       // request treo sẽ giữ màn hình ở "Đang tải…" vĩnh viễn (BUG-106/§36).
-      const canEarnKpi = user.role === 'staff' || user.role === 'shift_leader'
+      const canEarnKpi = user.role === 'staff' || user.role === 'shift_leader' || Boolean(user.canRoamBranches)
+      const kpiBranchIds = user.canRoamBranches ? permittedBranchIds(user) : [user.branchId]
       const [workShifts, registrations, records, rewardSources] = await Promise.all([
         withAttendanceReadDeadline(() => fetchWorkShifts(user), 'khung ca').catch(() => [] as WorkShift[]),
         withAttendanceReadDeadline(() => fetchShiftRegistrations(user, { userId: user.id, from, to }), 'ca đã đăng ký'),
         withAttendanceReadDeadline(() => fetchAttendanceRecords(user, { userId: user.id, from, to }), 'công đã chấm'),
         canEarnKpi
           ? Promise.all([
-              withAttendanceReadDeadline(() => fetchBagAllocations(user, { branchId: user.branchId }), 'doanh thu phát túi'),
-              withAttendanceReadDeadline(() => fetchSalesReceiptsRange(user, { branchIds: [user.branchId], from, to }), 'doanh thu POS'),
+              withAttendanceReadDeadline(() => fetchBagAllocations(user, user.canRoamBranches ? {} : { branchId: user.branchId }), 'doanh thu phát túi'),
+              withAttendanceReadDeadline(() => fetchSalesReceiptsRange(user, { branchIds: kpiBranchIds, from, to }), 'doanh thu POS'),
             ])
           : Promise.resolve(null),
       ])

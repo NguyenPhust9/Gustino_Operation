@@ -10,8 +10,10 @@ import {
   findAttendanceRecordForRegistration,
   isCheckInDue,
   isCheckOutDue,
+  switchActiveBranch,
   withAttendanceReadDeadline,
 } from '../lib/attendance'
+import { branchName, useConfiguredBranches } from '../lib/branches'
 import { addLocalDateKeyDays, localDateKey } from '../lib/dates'
 import { burstGuard } from '../lib/browser'
 import { shouldUseLanApi, supabase, uniqueChannelName } from '../lib/supabase'
@@ -120,51 +122,51 @@ const NAV_ITEMS: NavItem[] = [
     id: 'today',
     label: 'Hôm nay',
     icon: <IconCalendar />,
-    canShow: (user) => canUseOperations(user.role),
+    canShow: (user) => canUseOperations(user.role) || Boolean(user.canRoamBranches),
   },
   {
     id: 'sales',
     label: 'Bán hàng',
     icon: <IconShoppingBag />,
-    canShow: (user) => canUseSales(user.role),
+    canShow: (user) => canUseSales(user.role) || Boolean(user.canRoamBranches),
   },
   {
     id: 'my-records',
     label: 'Lịch sử & báo cáo',
     shortLabel: 'Lịch sử',
     icon: <IconHistory />,
-    canShow: (user) => user.role === 'staff' || user.role === 'shift_leader',
+    canShow: (user) => user.role === 'staff' || user.role === 'shift_leader' || Boolean(user.canRoamBranches),
   },
   {
     id: 'my-timesheet',
     label: 'Xem công',
     shortLabel: 'Công',
     icon: <IconClock />,
-    canShow: (user) => user.role === 'staff' || user.role === 'shift_leader' || user.role === 'supmt',
+    canShow: (user) => user.role === 'staff' || user.role === 'shift_leader' || user.role === 'supmt' || Boolean(user.canRoamBranches),
   },
   {
     id: 'handover',
     label: 'Bàn giao ca',
     icon: <IconHandover />,
-    canShow: (user) => canUseOperations(user.role),
+    canShow: (user) => canUseOperations(user.role) || Boolean(user.canRoamBranches),
   },
   {
     id: 'inventory',
     label: 'Kho hàng',
     icon: <IconBox />,
-    canShow: (user) => canUseOperations(user.role),
+    canShow: (user) => canUseOperations(user.role) || Boolean(user.canRoamBranches),
   },
   {
     id: 'orders',
     label: 'Đặt hàng',
     icon: <IconClipboard />,
-    canShow: (user) => canUseOperations(user.role),
+    canShow: (user) => canUseOperations(user.role) || Boolean(user.canRoamBranches),
   },
   {
     id: 'attendance',
     label: 'Chấm công',
     icon: <IconUsers />,
-    canShow: (user) => user.role !== 'kitchen' && user.role !== 'cashier',
+    canShow: (user) => (user.role !== 'kitchen' && user.role !== 'cashier') || Boolean(user.canRoamBranches),
   },
   {
     id: 'my-payslips',
@@ -236,11 +238,28 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
   const [reportReminderDismissed, setReportReminderDismissed] = useState(false)
   const [payslipNotifications, setPayslipNotifications] = useState<PayrollEntry[]>([])
   const [payslipNotificationOpen, setPayslipNotificationOpen] = useState(false)
+  const [switchingBranch, setSwitchingBranch] = useState(false)
+  const configuredBranches = useConfiguredBranches({ user })
+  const roamingBranches = configuredBranches.filter((branch) => branch.id !== 'central-kitchen')
+  const canSwitchBranch = Boolean(user.canRoamBranches) && roamingBranches.length > 0
+
+  async function handleSwitchWorkingBranch(nextBranchId: string) {
+    if (!nextBranchId || nextBranchId === user.branchId || switchingBranch) return
+    setSwitchingBranch(true)
+    try {
+      await switchActiveBranch(user, nextBranchId)
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Không thể chuyển chi nhánh làm việc.')
+    } finally {
+      setSwitchingBranch(false)
+    }
+  }
+
   const baseNav = user.role === 'admin'
     ? ADMIN_NAV
     : user.role === 'supmt'
       ? SUPMT_NAV
-      : user.role === 'manager'
+      : (user.role === 'manager' && !user.canRoamBranches)
         ? MANAGER_NAV
         : NAV_ITEMS
   const visibleNav = baseNav.filter((item) => item.canShow(user)).map((item) => ({
@@ -479,6 +498,37 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
           <strong className="sidebar-brand-name">GUSTINO</strong>
         </div>
 
+        {canSwitchBranch && (
+          <div style={{ padding: '8px 14px 4px' }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
+              📍 Điểm đang làm việc
+            </label>
+            <select
+              aria-label="Chọn điểm bán đang làm việc"
+              value={user.branchId}
+              disabled={switchingBranch}
+              onChange={(event) => void handleSwitchWorkingBranch(event.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: '1.5px solid #cbd5e1',
+                background: '#f8fafc',
+                color: '#0f172a',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: switchingBranch ? 'wait' : 'pointer',
+              }}
+            >
+              {roamingBranches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name || branchName(branch.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Navigation */}
         <nav className="sidebar-nav">
           {visibleNav.filter((item) => item.id !== 'control').map((item) => (
@@ -515,6 +565,24 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
       <header className="crm-desktop-header">
         <div className="crm-header-title"><small>GUSTINO / Quản trị</small><strong>{activeLabel}</strong></div>
         <div className="crm-header-actions">
+          {canSwitchBranch && (
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f1f5f9', padding: '4px 10px', borderRadius: 999, border: '1px solid #cbd5e1', fontSize: 12, fontWeight: 600 }}>
+              <span aria-hidden="true">📍</span>
+              <select
+                aria-label="Chi nhánh đang làm việc"
+                value={user.branchId}
+                disabled={switchingBranch}
+                onChange={(event) => void handleSwitchWorkingBranch(event.target.value)}
+                style={{ border: 'none', background: 'transparent', fontWeight: 700, fontSize: 12, color: '#0f172a', cursor: 'pointer', outline: 'none' }}
+              >
+                {roamingBranches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name || branchName(branch.id)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {messageShortcut}
           {canReceivePayslip(user.role) && payslipNotification}
           <span className="crm-header-avatar">{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials}</span>
@@ -529,6 +597,33 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
         </button>
         <div className="mh-brand">
           <span className="mh-title">{activeLabel}</span>
+          {canSwitchBranch && (
+            <select
+              aria-label="Chi nhánh đang làm việc"
+              value={user.branchId}
+              disabled={switchingBranch}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => void handleSwitchWorkingBranch(event.target.value)}
+              style={{
+                marginLeft: 6,
+                maxWidth: 145,
+                padding: '3px 8px',
+                borderRadius: 999,
+                border: '1px solid #cbd5e1',
+                background: '#f8fafc',
+                color: '#0f172a',
+                fontSize: 11,
+                fontWeight: 700,
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {roamingBranches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  📍 {branch.name || branchName(branch.id)}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="mh-right">
           {messageShortcut}

@@ -79,7 +79,10 @@ function App() {
   const refreshMovements = useCallback(async () => {
     if (!user) return
     const hadData = movementSyncRef.current?.branchId === user.branchId
-    if (!hadData) setMovementsStatus('loading')
+    if (!hadData) {
+      applyMovements([])
+      setMovementsStatus('loading')
+    }
     try {
       const data = await fetchMovements(user.branchId, user)
       movementSyncRef.current = {
@@ -335,23 +338,54 @@ function App() {
     void (async () => {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('role, branch_id, active')
+        .select('role, branch_id, active, can_roam_branches')
         .eq('id', user.id)
         .maybeSingle()
       if (!active || error) return
       const role = normalizeRole((profile?.role || user.role) as AppUser['role'])
-      const branchId = profile?.branch_id || user.branchId
+      const canRoamBranches = Boolean(profile?.can_roam_branches)
+      let branchId = profile?.branch_id || user.branchId
       let blocked = !profile || profile.active === false
-      if ((role === 'staff' || role === 'shift_leader' || role === 'cashier') && !branchId) blocked = true
-      if (!blocked && (role === 'staff' || role === 'shift_leader' || role === 'cashier')) {
-        const { data: branch } = await supabase
-          .from('branches')
-          .select('id, active')
-          .eq('id', branchId)
-          .maybeSingle()
-        blocked = !branch || branch.active === false
+      if (!blocked && (role === 'staff' || role === 'shift_leader' || role === 'cashier' || canRoamBranches)) {
+        if (!branchId && !canRoamBranches) {
+          blocked = true
+        } else if (branchId) {
+          const { data: branch } = await supabase
+            .from('branches')
+            .select('id, active')
+            .eq('id', branchId)
+            .maybeSingle()
+          if (!branch || branch.active === false) {
+            if (canRoamBranches) {
+              const { data: activeBranches } = await supabase
+                .from('branches')
+                .select('id')
+                .eq('active', true)
+              const fallbackBranch = ((activeBranches || []) as Array<{ id: string }>)[0]?.id
+              if (fallbackBranch) {
+                branchId = fallbackBranch
+                await supabase.rpc('switch_my_active_branch', { p_branch_id: fallbackBranch })
+              } else {
+                blocked = true
+              }
+            } else {
+              blocked = true
+            }
+          }
+        }
       }
-      if (!active || !blocked) return
+      if (!active) return
+      if (!blocked) {
+        if (Boolean(user.canRoamBranches) !== canRoamBranches || (branchId && user.branchId !== branchId)) {
+          setUser((current) => {
+            if (!current || current.id !== user.id) return current
+            const next = { ...current, branchId: branchId || current.branchId, canRoamBranches }
+            saveLocalUser(next)
+            return next
+          })
+        }
+        return
+      }
       await supabase.auth.signOut({ scope: 'local' }).catch(() => null)
       saveLocalUser(null)
       setUser(null)
@@ -362,12 +396,12 @@ function App() {
     }
   }, [user?.id, user?.branchId, user?.role, user?.authToken])
   useEffect(() => {
-    if (!user || !supabase || user.authToken || !(canUseManagement(user.role) || user.role === 'supmt')) return
+    if (!user || !supabase || user.authToken || !(canUseManagement(user.role) || user.role === 'supmt' || user.canRoamBranches)) return
     let active = true
     void (async () => {
       let nextBranchIds: string[] = []
-      // SUP MT đối chiếu toàn hệ thống nên nhận mọi chi nhánh active như admin.
-      if (hasSystemWideScope(user.role)) {
+      // SUP MT đối chiếu toàn hệ thống hoặc nhân sự lưu động nhận mọi chi nhánh active.
+      if (hasSystemWideScope(user.role) || user.canRoamBranches) {
         const { data } = await supabase
           .from('branches')
           .select('id')
@@ -398,7 +432,7 @@ function App() {
     return () => {
       active = false
     }
-  }, [user?.id, user?.role, user?.authToken])
+  }, [user?.id, user?.role, user?.canRoamBranches, user?.authToken])
   useEffect(() => {
     const onHashChange = () => {
       setPage(pageFromHash())
@@ -637,21 +671,22 @@ function latestMovementStamp(items: StockMovement[], fallback: string) {
 }
 
 function canAccessPage(user: AppUser, page: Page) {
+  const canRoam = Boolean(user.canRoamBranches)
   if (page === 'launcher') return true
   if (page === 'messages') return true
-  if (page === 'attendance') return user.role !== 'kitchen' && user.role !== 'manager' && user.role !== 'cashier'
+  if (page === 'attendance') return (user.role !== 'kitchen' && user.role !== 'manager' && user.role !== 'cashier') || canRoam
   if (page === 'dashboard') return user.role === 'manager'
-  if (page === 'sales') return canUseSales(user.role)
-  if (page === 'my-records') return user.role === 'staff' || user.role === 'shift_leader'
+  if (page === 'sales') return canUseSales(user.role) || canRoam
+  if (page === 'my-records') return user.role === 'staff' || user.role === 'shift_leader' || canRoam
   // Xem công: nhân viên/ca trưởng xem lịch công của chính mình (SUP MT xem được nếu tồn tại).
-  if (page === 'my-timesheet') return user.role === 'staff' || user.role === 'shift_leader' || user.role === 'supmt'
-  if (page === 'my-payslips') return canReceivePayslip(user.role)
+  if (page === 'my-timesheet') return user.role === 'staff' || user.role === 'shift_leader' || user.role === 'supmt' || canRoam
+  if (page === 'my-payslips') return canReceivePayslip(user.role) || canRoam
   if (page === 'report-archive') return canUseManagement(user.role)
-  if (page === 'report') return canUseOperations(user.role)
-  if (page === 'inventory') return canUseOperations(user.role)
+  if (page === 'report') return canUseOperations(user.role) || canRoam
+  if (page === 'inventory') return canUseOperations(user.role) || canRoam
   // Admin không phải người đặt hàng: admin theo dõi/lọc/xuất đơn ở mục Đặt hàng trong trang
   // Quản trị (#/management/requests), nên không vào trang lập phiếu đặt hàng của chi nhánh.
-  if (page === 'orders') return user.role !== 'admin' && (canUseManagement(user.role) || canUseOperations(user.role))
+  if (page === 'orders') return user.role !== 'admin' && (canUseManagement(user.role) || canUseOperations(user.role) || canRoam)
   // SUP MT vào cùng trang Quản trị với admin, nhưng ManagementPage khóa mọi thao tác ghi.
   if (page === 'management') return canOpenAdminConsole(user.role)
   if (page === 'manager-attendance') return canUseAdmin(user.role)
@@ -662,7 +697,7 @@ function canAccessPage(user: AppUser, page: Page) {
   if (page === 'control') return canUseAdmin(user.role)
   if (page === 'gustino-analyst') return user.role === 'admin'
   if (page === 'kitchen') return canUseKitchen(user.role)
-  return canUseOperations(user.role)
+  return canUseOperations(user.role) || canRoam
 }
 
 function defaultPageForRole(user: AppUser): Page {

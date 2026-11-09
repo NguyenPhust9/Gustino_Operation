@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchAttendanceRecords, fetchShiftRegistrations, findAttendanceRecordForRegistration } from '../lib/attendance'
+import { fetchAttendanceRecords, fetchShiftRegistrations, findAttendanceRecordForRegistration, permittedBranchIds } from '../lib/attendance'
 import { fetchSalesReceiptsRange, type SalesReceipt } from '../lib/salesReceipts'
 import { localDateKey } from '../lib/dates'
 import { ReportArchiveContent } from './ReportArchivePage'
@@ -9,7 +9,7 @@ import type { AppUser, AttendanceRecord, ShiftRegistration } from '../types'
 type RecordsTab = 'personal' | 'archive'
 
 export function MyRecordsPage({ user, onNavigate }: { user: AppUser; onNavigate: (page: Page) => void }) {
-  const isManagement = user.role === 'admin' || user.role === 'manager'
+  const isManagement = (user.role === 'admin' || user.role === 'manager') && !user.canRoamBranches
   const [tab, setTab] = useState<RecordsTab>(isManagement ? 'archive' : 'personal')
   if (isManagement) {
     return (
@@ -60,10 +60,11 @@ function PersonalRecords({ user, onNavigate }: { user: AppUser; onNavigate: (pag
   async function refresh(showLoading = false) {
     if (showLoading) setLoading(true)
     try {
+      const targetBranchIds = user.canRoamBranches ? permittedBranchIds(user) : [user.branchId]
       const [nextReceipts, nextRecords, nextRegistrations] = await Promise.all([
-        fetchSalesReceiptsRange(user, { branchIds: [user.branchId], from, to }),
-        fetchAttendanceRecords(user, { branchId: user.branchId, userId: user.id, from, to }),
-        fetchShiftRegistrations(user, { branchId: user.branchId, userId: user.id, from, to }),
+        fetchSalesReceiptsRange(user, { branchIds: targetBranchIds, from, to }),
+        fetchAttendanceRecords(user, { branchId: user.canRoamBranches ? undefined : user.branchId, userId: user.id, from, to }),
+        fetchShiftRegistrations(user, { branchId: user.canRoamBranches ? undefined : user.branchId, userId: user.id, from, to }),
       ])
       setReceipts(nextReceipts.filter((receipt) =>
         receipt.sellerId === user.id

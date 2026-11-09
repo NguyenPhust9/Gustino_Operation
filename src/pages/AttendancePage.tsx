@@ -26,6 +26,7 @@ import {
   permittedBranchIds,
   setScheduleEntry,
   setScheduleRegistration,
+  switchActiveBranch,
   withAttendanceReadDeadline,
 } from '../lib/attendance'
 import { useRef } from 'react'
@@ -81,7 +82,7 @@ function attendanceDataNeeds(tab: AttendanceTab, canAdjustSchedule: boolean) {
 }
 
 export function AttendancePage({ user, movements, onNavigate }: { user: AppUser; movements: StockMovement[]; onNavigate: (page: Page) => void }) {
-  const isManager = user.role === 'manager' || user.role === 'admin'
+  const isManager = (user.role === 'manager' || user.role === 'admin') && !user.canRoamBranches
   const canViewAttendanceDocuments = user.role === 'admin' || user.role === 'shift_leader'
   const canAdjustSchedule = canManageShiftSetup(user)
   const [tab, setTab] = useState<AttendanceTab>(isManager ? 'report' : 'schedule')
@@ -236,7 +237,7 @@ export function AttendancePage({ user, movements, onNavigate }: { user: AppUser;
     // lập/sửa lịch tuần (heading manager cũng hứa "Lập lịch theo tuần").
     { id: 'board', label: canAdjustSchedule ? 'Bảng lịch' : 'Đăng ký tuần', show: true },
     { id: 'documents', label: 'Chứng từ', show: canViewAttendanceDocuments },
-    { id: 'report', label: 'Bảng công', show: isManager },
+    { id: 'report', label: 'Bảng công', show: isManager || user.role === 'manager' },
   ]
 
   const changeTab = (nextTab: AttendanceTab) => {
@@ -507,8 +508,13 @@ function SchedulePanel({
     setBusyId(registration.id)
     setBusyPhase('locating')
     try {
+      let activeUser = user
+      if (user.canRoamBranches && registration.branchId && registration.branchId !== user.branchId) {
+        const switchedBranch = await switchActiveBranch(user, registration.branchId)
+        activeUser = { ...user, branchId: switchedBranch }
+      }
       const record = await checkIn(
-        user,
+        activeUser,
         registration,
         selfie,
         setBusyPhase,
@@ -984,7 +990,7 @@ function AttendanceAdjustmentForm({ user, onFeedback }: {
  * đúng chi nhánh của mình như cũ.
  */
 function attendanceBranchOptions(user: AppUser) {
-  if (hasSystemWideScope(user.role) || user.role === 'manager') return permittedBranchIds(user)
+  if (hasSystemWideScope(user.role) || user.role === 'manager' || user.canRoamBranches) return permittedBranchIds(user)
   return [user.branchId]
 }
 
@@ -1024,6 +1030,13 @@ function RegistrationPanel({
     : matchingRegistrations.length === recommendedStaff
       ? 'balanced'
       : 'crowded'
+
+  useEffect(() => {
+    if (user.branchId && user.branchId !== branchId) {
+      setBranchId(user.branchId)
+      setShiftId('')
+    }
+  }, [user.branchId])
 
   useEffect(() => {
     if (shiftId || !availableShifts.length) return
@@ -1069,7 +1082,12 @@ function RegistrationPanel({
         <div className="section-title"><div><span className="eyebrow dark">THÊM CA LÀM</span><h2>Chọn ngày và giờ làm</h2></div></div>
         <div className="form-grid">
           <label>Chi nhánh
-            <select value={branchId} disabled={branchIds.length === 1} onChange={(event) => { setBranchId(event.target.value); setShiftId('') }}>
+            <select value={branchId} disabled={branchIds.length === 1} onChange={(event) => {
+              const nextBranch = event.target.value
+              setBranchId(nextBranch)
+              setShiftId('')
+              if (user.canRoamBranches) void switchActiveBranch(user, nextBranch).catch(() => undefined)
+            }}>
               {branches.filter((item) => branchIds.includes(item.id)).map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
           </label>
@@ -1178,6 +1196,12 @@ function SharedScheduleBoard({
   const usingFallbackShifts = !branchShifts.length && fallbackShiftOptions.length > 0
 
   useEffect(() => {
+    if (user.branchId && user.branchId !== branchId) {
+      setBranchId(user.branchId)
+    }
+  }, [user.branchId])
+
+  useEffect(() => {
     if (!isScheduleManager && from < localDateKey()) setFrom(localDateKey())
   }, [from, isScheduleManager])
 
@@ -1202,8 +1226,12 @@ function SharedScheduleBoard({
     const byProfile = new Map<string, SchedulePerson>()
     const unlinked: SchedulePerson[] = []
     for (const person of people) {
-      if (person.profileId) byProfile.set(person.profileId, person)
-      else unlinked.push(person)
+      if (person.profileId) {
+        const isCurrentRoamingUser = person.profileId === user.id && (hasSystemWideScope(user.role) || Boolean(user.canRoamBranches))
+        byProfile.set(person.profileId, isCurrentRoamingUser ? { ...person, branchId } : person)
+      } else {
+        unlinked.push(person)
+      }
     }
     let order = people.length
     if (!byProfile.has(user.id)) {
@@ -1211,9 +1239,9 @@ function SharedScheduleBoard({
         id: user.id,
         profileId: user.id,
         name: user.name,
-        // SUP MT/admin không có chi nhánh cố định: gắn theo chi nhánh đang xem để dòng
+        // SUP MT/admin hoặc nhân sự lưu động: gắn theo chi nhánh đang xem để dòng
         // của chính họ không bị lọc mất (bảng lịch lọc theo `person.branchId === branchId`).
-        branchId: user.branchId || branchId,
+        branchId: (hasSystemWideScope(user.role) || user.canRoamBranches) ? branchId : (user.branchId || branchId),
         employmentType: user.employmentType,
         positionTitle: user.positionTitle,
         active: true,
@@ -1221,13 +1249,20 @@ function SharedScheduleBoard({
       })
     }
     for (const employee of employees) {
-      if (!employee.branchId || employee.active === false) continue
-      if (byProfile.has(employee.id)) continue
+      if ((!employee.branchId && !employee.canRoamBranches) || employee.active === false) continue
+      const targetEmployeeBranch = employee.canRoamBranches ? branchId : employee.branchId!
+      if (byProfile.has(employee.id)) {
+        if (employee.canRoamBranches) {
+          const existing = byProfile.get(employee.id)!
+          byProfile.set(employee.id, { ...existing, branchId })
+        }
+        continue
+      }
       byProfile.set(employee.id, {
         id: employee.id,
         profileId: employee.id,
         name: employee.name,
-        branchId: employee.branchId,
+        branchId: targetEmployeeBranch,
         employmentType: employee.employmentType,
         positionTitle: employee.positionTitle,
         active: true,
@@ -1235,7 +1270,7 @@ function SharedScheduleBoard({
       })
     }
     return [...byProfile.values(), ...unlinked]
-  }, [people, employees, branchId, user.id, user.name, user.branchId, user.employmentType, user.positionTitle])
+  }, [people, employees, branchId, user.id, user.name, user.role, user.branchId, user.canRoamBranches, user.employmentType, user.positionTitle])
   const schedulePeople = mergedPeople
     .filter((person) => person.branchId === branchId && person.active)
     .sort((a, b) => {
@@ -1561,7 +1596,11 @@ function SharedScheduleBoard({
         </div>
         <div className="shared-schedule-filters">
           <label>Chi nhánh
-            <select value={branchId} disabled={branchIds.length === 1} onChange={(event) => setBranchId(event.target.value)}>
+            <select value={branchId} disabled={branchIds.length === 1} onChange={(event) => {
+              const nextBranch = event.target.value
+              setBranchId(nextBranch)
+              if (user.canRoamBranches) void switchActiveBranch(user, nextBranch).catch(() => undefined)
+            }}>
               {branches.filter((branch) => branchIds.includes(branch.id)).map((branch) =>
                 <option key={branch.id} value={branch.id}>{branch.name}</option>,
               )}

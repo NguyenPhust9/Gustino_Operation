@@ -52,7 +52,7 @@ export function LoginPage({ onLogin }: Props) {
         const metadata = data.user.user_metadata
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, role, branch_id, active, employment_type, position_title, avatar_url')
+          .select('full_name, role, branch_id, can_roam_branches, active, employment_type, position_title, avatar_url')
           .eq('id', data.user.id)
           .maybeSingle()
         if (!profile || profile.active === false) {
@@ -60,17 +60,23 @@ export function LoginPage({ onLogin }: Props) {
           throw new Error('Tài khoản này đã bị khóa hoặc chưa được cấp hồ sơ nhân sự.')
         }
         const role = normalizeRole((profile?.role || metadata.role || 'shift_leader') as Role)
-        const profileBranchId = profile?.branch_id || metadata.branch_id || branchId
+        const canRoamBranches = Boolean(profile?.can_roam_branches)
+        let profileBranchId = profile?.branch_id || metadata.branch_id || branchId
         let branchIds: string[] = []
-        // SUP MT (giám sát) đối chiếu bảng lương/bảng công toàn hệ thống → thấy mọi chi nhánh active.
-        if (role === 'admin' || role === 'supmt') {
+        // SUP MT (giám sát) hoặc nhân sự lưu động (canRoamBranches) thấy mọi chi nhánh active.
+        if (role === 'admin' || role === 'supmt' || canRoamBranches) {
           const { data: activeBranches } = await supabase
             .from('branches')
             .select('id')
             .eq('active', true)
+          const activeBranchList = ((activeBranches || []) as Array<{ id: string }>).map((item) => item.id)
+          if (canRoamBranches && (!profileBranchId || !activeBranchList.includes(profileBranchId)) && activeBranchList.length > 0) {
+            profileBranchId = activeBranchList[0]
+            await supabase.rpc('switch_my_active_branch', { p_branch_id: profileBranchId })
+          }
           branchIds = Array.from(new Set([
             profileBranchId,
-            ...((activeBranches || []) as Array<{ id: string }>).map((item) => item.id),
+            ...activeBranchList,
           ].filter(Boolean)))
         } else if (role === 'manager') {
           const { data: assignments } = await supabase
@@ -113,6 +119,7 @@ export function LoginPage({ onLogin }: Props) {
           role,
           branchId: profileBranchId,
           branchIds,
+          canRoamBranches,
           employmentType: profile?.employment_type || undefined,
           positionTitle: profile?.position_title || undefined,
           avatarUrl: profile?.avatar_url || undefined,
