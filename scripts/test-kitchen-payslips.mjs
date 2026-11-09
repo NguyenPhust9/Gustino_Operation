@@ -15,6 +15,7 @@ assert.match(page, /canReceivePayslip\(employee\.role\) && Boolean\(payrollBranc
 assert.match(page, /\{ id: KITCHEN_PAYROLL_BRANCH\.id, name: KITCHEN_PAYROLL_BRANCH\.name \}/, 'Danh sách phải có nhóm Bếp trung tâm.')
 assert.match(page, /fetchPayrollEntries\(user, period, payrollBranchIds\)/, 'Phải tải phiếu lương đã lưu của bếp.')
 assert.match(page, /employee\.role !== 'kitchen'/, 'Không tính KPI quầy cho bếp.')
+assert.match(page, /useMemo\(\(\) => permittedBranchIds\(user\), \[user, branches\]\)/, 'Phải tính lại danh sách chi nhánh khi branches từ cloud tải về.')
 assert.match(app, /if \(page === 'my-payslips'\) return canReceivePayslip\(user\.role\)/)
 assert.match(sql, /role::text in \('staff', 'shift_leader', 'cashier', 'kitchen'\)/)
 console.log('KITCHEN_PAYSLIPS_OK')

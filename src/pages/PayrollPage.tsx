@@ -38,7 +38,7 @@ export function PayrollPage({ user }: { user: AppUser }) {
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
 
-  const allowedBranchIds = useMemo(() => permittedBranchIds(user), [user])
+  const allowedBranchIds = useMemo(() => permittedBranchIds(user), [user, branches])
   // Bếp không thuộc chi nhánh nào → thêm nhóm "Bếp trung tâm" để phiếu lương của bếp không bị sót.
   const payrollBranchIds = useMemo(() => Array.from(new Set([...allowedBranchIds, KITCHEN_PAYROLL_BRANCH.id])), [allowedBranchIds])
   const visibleBranches = [...branches.filter((branch) => allowedBranchIds.includes(branch.id) && branch.id !== KITCHEN_PAYROLL_BRANCH.id), { id: KITCHEN_PAYROLL_BRANCH.id, name: KITCHEN_PAYROLL_BRANCH.name }]
