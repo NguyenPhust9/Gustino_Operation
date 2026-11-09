@@ -17,7 +17,7 @@ import { burstGuard } from '../lib/browser'
 import { shouldUseLanApi, supabase, uniqueChannelName } from '../lib/supabase'
 import { ATTENDANCE_OUTBOX_EVENT, inspectAttendanceOutbox } from '../lib/attendanceOutbox'
 import { pendingHandoverReportForToday, REPORT_PENDING_EVENT, type HandoverReportRequest } from '../lib/handoverReportRequest'
-import { fetchOwnPublishedPayslips, PAYSLIP_VIEWED_EVENT, type PayrollEntry } from '../lib/payroll'
+import { canReceivePayslip, fetchOwnPublishedPayslips, PAYSLIP_VIEWED_EVENT, type PayrollEntry } from '../lib/payroll'
 import type { AppUser } from '../types'
 import { AppFooter } from './AppFooter'
 
@@ -171,7 +171,7 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Lương',
     shortLabel: 'Lương',
     icon: <IconPayroll />,
-    canShow: (user) => user.role === 'staff' || user.role === 'shift_leader' || user.role === 'cashier',
+    canShow: (user) => canReceivePayslip(user.role),
   },
   {
     id: 'kitchen',
@@ -258,7 +258,7 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
   }
 
   useEffect(() => {
-    if (!['staff', 'shift_leader', 'cashier'].includes(user.role)) {
+    if (!canReceivePayslip(user.role)) {
       setPayslipNotifications([])
       return
     }
@@ -516,7 +516,7 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
         <div className="crm-header-title"><small>GUSTINO / Quản trị</small><strong>{activeLabel}</strong></div>
         <div className="crm-header-actions">
           {messageShortcut}
-          {['staff', 'shift_leader', 'cashier'].includes(user.role) && payslipNotification}
+          {canReceivePayslip(user.role) && payslipNotification}
           <span className="crm-header-avatar">{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials}</span>
           <span className="crm-header-account"><strong>{shownName}</strong><small>{roleLabel(user.role, lang)}</small></span>
         </div>
@@ -532,7 +532,7 @@ export function AppShell({ user, page, currentSection, onNavigate, onLogout, chi
         </div>
         <div className="mh-right">
           {messageShortcut}
-          {['staff', 'shift_leader', 'cashier'].includes(user.role) && payslipNotification}
+          {canReceivePayslip(user.role) && payslipNotification}
           <button
             className={`mh-avatar${menuOpen ? ' open' : ''}`}
             onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen) }}

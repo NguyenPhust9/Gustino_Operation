@@ -13,6 +13,7 @@ import { adminRouteForSection, adminSectionForRoute } from './pages/admin/routeM
 import { canOpenAdminConsole, canUseAdmin, canUseKitchen, canUseManagement, canUseOperations, canUseSales, hasSystemWideScope, normalizeRole } from './lib/access'
 import { clearSessionStart, markSessionStart, sessionOverdueMs, setSessionExpiredNotice } from './lib/sessionExpiry'
 import { fetchConfiguredProducts, subscribeConfiguredProducts } from './lib/products'
+import { canReceivePayslip } from './lib/payroll'
 import type { AppUser, StockMovement } from './types'
 import { applyLanguageToDocument, useLang } from './lib/i18n'
 import { CapyLoadingWindow } from './components/GlobalLoadingOverlay'
@@ -644,7 +645,7 @@ function canAccessPage(user: AppUser, page: Page) {
   if (page === 'my-records') return user.role === 'staff' || user.role === 'shift_leader'
   // Xem công: nhân viên/ca trưởng xem lịch công của chính mình (SUP MT xem được nếu tồn tại).
   if (page === 'my-timesheet') return user.role === 'staff' || user.role === 'shift_leader' || user.role === 'supmt'
-  if (page === 'my-payslips') return user.role === 'staff' || user.role === 'shift_leader' || user.role === 'cashier'
+  if (page === 'my-payslips') return canReceivePayslip(user.role)
   if (page === 'report-archive') return canUseManagement(user.role)
   if (page === 'report') return canUseOperations(user.role)
   if (page === 'inventory') return canUseOperations(user.role)

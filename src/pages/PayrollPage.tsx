@@ -4,7 +4,7 @@ import { useConfiguredBranches } from '../lib/branches'
 import { calculatePersonalKpiReward } from '../lib/commission'
 import { fetchBagAllocations } from '../lib/shiftLedger'
 import { fetchSalesReceiptsRange } from '../lib/salesReceipts'
-import { deletePayrollEntry, revokePayrollEntry, fetchPayrollEntries, fetchPayrollFixedConfigs, publishPayrollEntries, upsertPayrollEntry, type PayrollEntry, type PayrollFixedConfig } from '../lib/payroll'
+import { canReceivePayslip, deletePayrollEntry, revokePayrollEntry, fetchPayrollEntries, fetchPayrollFixedConfigs, KITCHEN_PAYROLL_BRANCH, payrollBranchId, publishPayrollEntries, upsertPayrollEntry, type PayrollEntry, type PayrollFixedConfig } from '../lib/payroll'
 import { employeePositionLabel } from '../lib/access'
 import { localDateKey } from '../lib/dates'
 import type { AppUser, EmployeeProfile } from '../types'
@@ -17,7 +17,6 @@ const EMPTY_DRAFT: Draft = {
   baseSalary: '', responsibilityAllowance: '', attendanceAllowance: '', mealTransportAllowance: '',
   agreedSalary: '', dailyRate: '', workdaySalary: '', overtimeHours: '', kpiBonus: '', netSalary: '', note: '',
 }
-const PAYROLL_ROLES = new Set(['shift_leader', 'staff', 'cashier'])
 
 export function PayrollPage({ user }: { user: AppUser }) {
   const branches = useConfiguredBranches({ user })
@@ -40,7 +39,9 @@ export function PayrollPage({ user }: { user: AppUser }) {
   const [feedback, setFeedback] = useState('')
 
   const allowedBranchIds = useMemo(() => permittedBranchIds(user), [user])
-  const visibleBranches = branches.filter((branch) => allowedBranchIds.includes(branch.id))
+  // Bếp không thuộc chi nhánh nào → thêm nhóm "Bếp trung tâm" để phiếu lương của bếp không bị sót.
+  const payrollBranchIds = useMemo(() => Array.from(new Set([...allowedBranchIds, KITCHEN_PAYROLL_BRANCH.id])), [allowedBranchIds])
+  const visibleBranches = [...branches.filter((branch) => allowedBranchIds.includes(branch.id) && branch.id !== KITCHEN_PAYROLL_BRANCH.id), { id: KITCHEN_PAYROLL_BRANCH.id, name: KITCHEN_PAYROLL_BRANCH.name }]
   const monthFrom = `${period}-01`
   const monthTo = lastDayOfMonth(period)
 
@@ -52,15 +53,18 @@ export function PayrollPage({ user }: { user: AppUser }) {
       fetchEmployees(user, { includeInactive: false }),
       fetchShiftRegistrations(user, { from: monthFrom, to: monthTo }),
       fetchAttendanceRecords(user, { from: monthFrom, to: monthTo }),
-      fetchPayrollEntries(user, period, allowedBranchIds),
-      fetchPayrollFixedConfigs(user, allowedBranchIds),
+      fetchPayrollEntries(user, period, payrollBranchIds),
+      fetchPayrollFixedConfigs(user, payrollBranchIds),
       Promise.all(allowedBranchIds.map((id) => fetchBagAllocations(user, { branchId: id }))).then((rows) => rows.flat()),
       fetchSalesReceiptsRange(user, { branchIds: allowedBranchIds, from: monthFrom, to: monthTo }),
     ]).then(([nextEmployees, registrations, records, nextEntries, nextConfigs, allocations, receipts]) => {
       if (!active) return
       const report = buildAttendanceReport(registrations, records, new Map())
-      const payrollEmployees = nextEmployees.filter((employee) => employee.active !== false && Boolean(employee.branchId) && PAYROLL_ROLES.has(employee.role))
-      const rewards = Object.fromEntries(payrollEmployees.map((employee) => [employee.id, calculatePersonalKpiReward({
+      const payrollEmployees = nextEmployees
+        .filter((employee) => employee.active !== false && canReceivePayslip(employee.role) && Boolean(payrollBranchId(employee)))
+        .map((employee) => ({ ...employee, branchId: payrollBranchId(employee) }))
+      // KPI cá nhân tính từ doanh số quầy, không áp dụng cho bếp.
+      const rewards = Object.fromEntries(payrollEmployees.filter((employee) => employee.role !== 'kitchen').map((employee) => [employee.id, calculatePersonalKpiReward({
         id: employee.id,
         name: employee.name,
         role: employee.role,
@@ -85,7 +89,7 @@ export function PayrollPage({ user }: { user: AppUser }) {
   const allRows = useMemo(() => employees
     .map((employee) => ({
       ...buildPayslipRow(employee, entries, configs, attendanceRows, kpiByEmployee),
-      branchName: branches.find((branch) => branch.id === employee.branchId)?.name || employee.branchId || 'Chưa gán chi nhánh',
+      branchName: employee.branchId === KITCHEN_PAYROLL_BRANCH.id ? KITCHEN_PAYROLL_BRANCH.name : branches.find((branch) => branch.id === employee.branchId)?.name || employee.branchId || 'Chưa gán chi nhánh',
     }))
     .sort((a, b) => a.branchId.localeCompare(b.branchId) || a.employeeName.localeCompare(b.employeeName, 'vi')), [employees, entries, configs, attendanceRows, kpiByEmployee, branches])
   const rows = useMemo(() => {

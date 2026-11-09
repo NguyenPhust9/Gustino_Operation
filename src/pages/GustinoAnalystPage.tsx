@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -30,6 +30,8 @@ interface FinancialConfig {
   branch_break_even: Record<string, number>
 }
 
+const AUTO_REFRESH_MS = 3 * 60_000
+const RESUME_REFRESH_MS = 60_000
 const COLORS = ['#2d9cdb', '#8b5cf6', '#6366f1', '#10b981', '#f59e0b', '#94a3b8']
 
 export function GustinoAnalystPage({ user }: { user: AppUser }) {
@@ -44,12 +46,15 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
   const [reloadTick, setReloadTick] = useState(0)
   const [revenueMode, setRevenueMode] = useState<'daily' | 'cumulative'>('daily')
   const [itemMode, setItemMode] = useState<'revenue' | 'quantity'>('revenue')
+  const loadingRef = useRef(false)
+  const lastLoadedAtRef = useRef(0)
 
   useEffect(() => {
     if (user.role !== 'admin') return
     let active = true
     async function load() {
       setLoading(true)
+      loadingRef.current = true
       setError('')
       try {
         const token = user.authToken || (await supabase?.auth.getSession())?.data.session?.access_token || ''
@@ -72,12 +77,37 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu CUKCUK.')
       } finally {
-        if (active) setLoading(false)
+        if (active) {
+          setLoading(false)
+          loadingRef.current = false
+          lastLoadedAtRef.current = Date.now()
+        }
       }
     }
     void load()
     return () => { active = false }
   }, [user.id, user.authToken, user.role, from, to, branchId, reloadTick])
+
+  // CUKCUK không có webhook nên tự kéo lại định kỳ; thêm làm mới khi quay lại tab/mở máy/có mạng để tránh số liệu cũ khi treo máy.
+  useEffect(() => {
+    if (user.role !== 'admin') return
+    const refreshIfStale = (maxAgeMs: number) => {
+      if (document.visibilityState !== 'visible' || loadingRef.current) return
+      const loadedAt = lastLoadedAtRef.current
+      if (!loadedAt || Date.now() - loadedAt >= maxAgeMs) setReloadTick((tick) => tick + 1)
+    }
+    const interval = window.setInterval(() => refreshIfStale(AUTO_REFRESH_MS - 5_000), 30_000)
+    const onResume = () => refreshIfStale(RESUME_REFRESH_MS)
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('focus', onResume)
+    window.addEventListener('online', onResume)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('focus', onResume)
+      window.removeEventListener('online', onResume)
+    }
+  }, [user.role])
 
   const peak = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.invoices - a.invoices)[0], [data])
   const peakRevenue = useMemo(() => [...(data?.hourly || [])].sort((a, b) => b.revenue - a.revenue)[0], [data])
@@ -113,7 +143,7 @@ export function GustinoAnalystPage({ user }: { user: AppUser }) {
       {!data && loading && <div className="analyst-state"><strong>Đang kết nối CUKCUK…</strong><span>Đang tải hóa đơn và chi tiết món từ API.</span></div>}
 
       {data && <>
-        <section className="analyst-heading"><div><h1>Tổng quan toàn chuỗi</h1><p>{formatDate(from)} – {formatDate(to)} · nguồn CUKCUK API</p></div><small>Dữ liệu cập nhật {formatDateTime(data.generatedAt)}</small></section>
+        <section className="analyst-heading"><div><h1>Tổng quan toàn chuỗi</h1><p>{formatDate(from)} – {formatDate(to)} · nguồn CUKCUK API</p></div><small>Dữ liệu cập nhật {formatDateTime(data.generatedAt)} · tự làm mới mỗi 3 phút</small></section>
         <section className="analyst-kpis">
           <KpiCard tone="purple" label="Doanh thu thực tế" value={money(data.overview.revenue)} detail={`${data.overview.invoiceCount.toLocaleString('vi-VN')} hóa đơn đã thu tiền`} />
           <KpiCard tone="blue" label="Doanh thu hòa vốn kỳ" value={breakEvenRevenue === null ? 'Chưa cấu hình' : money(breakEvenRevenue)} detail={financialConfig ? `Lãi gộp ${percentRate(financialConfig.gross_margin_rate)} · Định phí ${compactMoney(financialConfig.fixed_cost)}` : `Chưa có cấu hình tháng ${from.slice(5, 7)}/${from.slice(0, 4)}`} />

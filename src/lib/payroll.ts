@@ -33,6 +33,19 @@ export interface PayrollFixedConfig {
   mealTransportAllowance: number
 }
 
+// Các vai trò nhận phiếu lương. Bếp là vai trò không gán chi nhánh (branch_id = null)
+// nên phiếu lương của bếp được gom vào nhóm ảo KITCHEN_PAYROLL_BRANCH.
+export const PAYSLIP_EMPLOYEE_ROLES: Role[] = ['shift_leader', 'staff', 'cashier', 'kitchen']
+export const KITCHEN_PAYROLL_BRANCH = { id: 'central-kitchen', name: 'Bếp trung tâm' } as const
+
+export function canReceivePayslip(role: Role) {
+  return PAYSLIP_EMPLOYEE_ROLES.includes(role)
+}
+
+export function payrollBranchId(employee: { role: Role; branchId?: string }) {
+  return employee.role === 'kitchen' ? KITCHEN_PAYROLL_BRANCH.id : employee.branchId || ''
+}
+
 function assertAdmin(user: AppUser) {
   if (user.role !== 'admin') throw new Error('Chỉ Admin hệ thống được xem và chỉnh phiếu lương.')
 }
@@ -143,7 +156,7 @@ export async function publishPayrollEntries(user: AppUser, entries: PayrollEntry
 }
 
 export async function fetchOwnPublishedPayslips(user: AppUser): Promise<PayrollEntry[]> {
-  if (!['shift_leader', 'staff', 'cashier'].includes(user.role) || shouldUseLanApi(user) || !supabase) return []
+  if (!canReceivePayslip(user.role) || shouldUseLanApi(user) || !supabase) return []
   const { data, error } = await supabase.from('payroll_entries')
     .select('*')
     .eq('employee_id', user.id)
@@ -183,7 +196,7 @@ export async function deletePayrollEntry(user: AppUser, entryId: string): Promis
 }
 
 export async function markOwnPayslipViewed(user: AppUser, entryId: string): Promise<void> {
-  if (!entryId || !['shift_leader', 'staff', 'cashier'].includes(user.role)) return
+  if (!entryId || !canReceivePayslip(user.role)) return
   if (shouldUseLanApi(user) || !supabase) return
   const { error } = await supabase.rpc('mark_own_payslip_viewed', { p_entry_id: entryId })
   if (error) {
@@ -194,7 +207,7 @@ export async function markOwnPayslipViewed(user: AppUser, entryId: string): Prom
 }
 
 export async function confirmOwnPayslip(user: AppUser, entry: PayrollEntry): Promise<string> {
-  if (!['shift_leader', 'staff', 'cashier'].includes(user.role) || entry.employeeId !== user.id) throw new Error('Chỉ được xác nhận phiếu lương của chính mình.')
+  if (!canReceivePayslip(user.role) || entry.employeeId !== user.id) throw new Error('Chỉ được xác nhận phiếu lương của chính mình.')
   if (!entry.id || !entry.publishedAt) throw new Error('Phiếu lương chưa được gửi hoặc đã thu hồi.')
   if (shouldUseLanApi(user) || !supabase) throw new Error('Môi trường LAN chưa hỗ trợ xác nhận phiếu lương.')
   const { data, error } = await supabase.rpc('confirm_own_payslip', { p_entry_id: entry.id, p_published_at: entry.publishedAt })
