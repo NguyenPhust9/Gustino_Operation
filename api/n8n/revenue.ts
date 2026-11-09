@@ -40,6 +40,22 @@ function getSupabaseAdmin(): any {
 
 type Filters = { branchId?: string; from?: string; to?: string }
 
+// Mã nội bộ của Gustino được giữ ổn định; nguồn nhập liệu CUKCUK có thể gửi
+// BranchId UUID. Chuẩn hóa UUID về cùng mã nội bộ trước khi trả dữ liệu cho n8n.
+const CUKCUK_BRANCH_ID_TO_INTERNAL: Record<string, string> = {
+  '25918ee6-0a4f-4054-a998-781da5f47427': 'cn-15h',
+  '35cbc887-7a8d-49ef-a80f-f12097bf163b': 'gold-coast',
+  '574c3c30-927d-4364-a55b-4c71228603f3': 'lotte-2310',
+  'd6ea5fd4-31d4-491b-bcf2-36eac5258b62': 'lotte-vt',
+  '269e5c36-a095-4905-ac6e-c46e96a9b80a': 'passio-pho-quang',
+  '263f6baa-3780-47d1-856b-08f36d32be93': 'passio-dong-den',
+}
+
+function normalizeBranchId(branchId: unknown): string {
+  const value = String(branchId || '')
+  return CUKCUK_BRANCH_ID_TO_INTERNAL[value.toLowerCase()] || value
+}
+
 interface DailyRevenueRow {
   id: string
   branchId: string
@@ -128,7 +144,7 @@ function latestSnapshotRows(rawSnapshots: any[]): DailyRevenueRow[] {
   })
   return Array.from(latestByDay.values()).map((snap) => ({
     id: snap.id,
-    branchId: snap.branch_id,
+    branchId: normalizeBranchId(snap.branch_id),
     reportDate: snap.report_date,
     revenue: snap.payload?.summary?.revenue || 0,
     totalSold: snap.payload?.summary?.totalSold || 0,
@@ -169,10 +185,11 @@ async function fetchReceiptsInRange(supabase: any, filters: Filters) {
 function liveReceiptRows(receipts: any[]): DailyRevenueRow[] {
   const rows = new Map<string, DailyRevenueRow>()
   receipts.forEach((receipt) => {
-    const key = `${receipt.branch_id}|${receipt.business_date}`
+    const branchId = normalizeBranchId(receipt.branch_id)
+    const key = `${branchId}|${receipt.business_date}`
     const current = rows.get(key) || {
       id: `receipt-${key}`,
-      branchId: receipt.branch_id,
+      branchId,
       reportDate: receipt.business_date,
       revenue: 0,
       totalSold: 0,
@@ -230,10 +247,11 @@ function liveAllocationRows(allocations: any[], priceMap: Map<string, number>): 
       damagedQuantity: Number(allocation.damaged_quantity || 0),
     })
     if (sold <= 0) return
-    const key = `${allocation.branch_id}|${reportDate}`
+    const branchId = normalizeBranchId(allocation.branch_id)
+    const key = `${branchId}|${reportDate}`
     const current: DailyRevenueRow & { issued: number } = rows.get(key) || {
       id: `live-${key}`,
-      branchId: allocation.branch_id,
+      branchId,
       reportDate,
       revenue: 0,
       totalSold: 0,
@@ -281,10 +299,11 @@ async function fetchSaleOutMovements(supabase: any, filters: Filters) {
 function liveMovementRows(movements: any[], priceMap: Map<string, number>): DailyRevenueRow[] {
   const rows = new Map<string, DailyRevenueRow>()
   movements.forEach((movement) => {
-    const key = `${movement.branch_id}|${movement.shift_date}`
+    const branchId = normalizeBranchId(movement.branch_id)
+    const key = `${branchId}|${movement.shift_date}`
     const current = rows.get(key) || {
       id: `movement-${key}`,
-      branchId: movement.branch_id,
+      branchId,
       reportDate: movement.shift_date,
       revenue: 0,
       totalSold: 0,

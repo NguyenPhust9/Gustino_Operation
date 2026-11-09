@@ -1,5 +1,21 @@
 # Session Handoff
 
+## 2026-10-09 — Production employee payslip RLS verified
+- User applied the supplied SQL restoring employee SELECT for `employee_id = auth.uid()` and `published_at is not null`.
+- Read-only verification signed in as Đình Phát and returned the exact September payslip with populated net salary; auth/profile/payroll IDs match. The production RLS blocker is resolved.
+- Separate local notification-history UI changes remain unpushed/undeployed and still require release for viewed notifications to remain visible in the bell dropdown.
+
+## 2026-10-09 — Payslip notification retention
+- Active fix: viewed payslip notifications remain in the bell dropdown; unread count still drives the badge.
+- Ordering is unread first, then newest publication timestamp. Rows show `Chưa xem` or `Đã xem`; clicking either opens the selected payslip period.
+- Changed application files: `src/components/AppShell.tsx`, `src/lib/payroll.ts`, `src/styles.css`; notification contract updated.
+- Focused payroll regressions, TypeScript and the full 733-module production build/bundle guard pass (`index-BZ0axhOE.js`). Next exact action: diff check, then signed-in visual verification and authorized push/deploy.
+
+## 2026-10-09 — Production payslip period correction complete
+- User reported the newly entered September payroll was mistakenly saved under October. Audit identified 38 published rows sharing the same update timestamp in `2026-10`.
+- One target conflict existed for Trần Minh Lý; user identified it as a test row and authorized overwrite. That exact test row was deleted and all 38 audited source IDs were moved to `2026-09`.
+- Verification result: `MOVED_PAYROLL_PERIOD_OK 38 2026-10 -> 2026-09`; ID-scoped counts were October 0 and September 38. No deploy/schema/formula/code behavior change was involved.
+
 ## 2026-10-09 — MOD-07 Admin payslip editing
 - Active request: Admin must be able to enter and edit payslip values.
 - Root cause/fix: removed `readOnly` from system-prefilled payslip inputs and changed overtime/KPI save mapping to use the Admin draft. Source values remain initial suggestions with an explicit editable label.

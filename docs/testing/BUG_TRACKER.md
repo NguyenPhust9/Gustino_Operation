@@ -1,5 +1,15 @@
 # Bug Tracker
 
+## 2026-10-09 — Employee own published payslip hidden by production RLS (closed)
+- **Evidence:** Admin saw Đình Phát's published September row; the matching employee auth UID received an empty result with no API error.
+- **Fix:** user applied an own-row-and-published-only SELECT policy plus authenticated SELECT grant. No draft or cross-employee read was authorized.
+- **Verification:** employee-session read now returns the exact September row, `employeeReadError=null`, with net salary present. Closed in production.
+
+## 2026-10-09 — Viewed payslip notifications disappeared (fixed locally)
+- **Evidence:** `AppShell.tsx` rendered `unreadPayslips.slice(0, 6)`, so setting `employeeViewedAt` immediately removed the item from the dropdown. The data adapter sorted by payroll period rather than notification publication time.
+- **Fix:** render the full published-notification list, keep the unread badge separate, prioritize unread items and then newer `publishedAt`, show read state, and order the backend query by `published_at` descending.
+- **Verification:** updated delivery/notification contract, revoke/delete/viewed/confirmation, Admin payslip/editable regressions, TypeScript and the full 733-module production build/bundle guard pass. Signed-in visual verification remains pending.
+
 ## 2026-10-09 — Admin payslip fields locked (fixed locally)
 - **Evidence:** `PayrollPage.tsx` applied `readOnly` to salary configuration, attendance overtime and KPI-derived inputs. `saveDetail()` additionally replaced edited overtime/KPI values with prior entry/null values whenever a system source existed.
 - **Fix:** retain system-derived values as prefilled suggestions, remove the Admin input locks, label their origin, and persist the exact values shown in all editable fields. Existing formulas and source calculations remain unchanged until Admin explicitly saves an override.

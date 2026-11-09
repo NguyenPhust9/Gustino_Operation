@@ -161,7 +161,7 @@ export async function fetchOwnPublishedPayslips(user: AppUser): Promise<PayrollE
     .select('*')
     .eq('employee_id', user.id)
     .not('published_at', 'is', null)
-    .order('period', { ascending: false })
+    .order('published_at', { ascending: false })
     .limit(24)
   if (!error) return (data || []).map(mapEntry)
   if (missingPayrollColumn(error)) return []

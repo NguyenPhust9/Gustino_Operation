@@ -1,5 +1,11 @@
 # Decision Log
 
+- 2026-10-09 — User applied the narrow production payroll read policy after direct review: authenticated employees may select only their own published payslips. Post-apply employee-session evidence confirms the intended access without cross-employee or draft access expansion.
+
+- 2026-10-09 — A payslip notification is history, so viewing changes its read state without removing it. The bell badge counts unread only; dropdown ordering prioritizes unread notifications and then publication recency. This does not change payslip publication, employee ownership, or acknowledgement permissions.
+
+- 2026-10-09 — User confirmed the existing September payslip for Trần Minh Lý was test data and directly authorized replacing it while correcting the newly published 38-row payroll batch from period `2026-10` to `2026-09`. The correction is limited to the exact audited batch IDs and the single confirmed test conflict.
+
 - 2026-10-09 — User explicitly requires Admin to edit and enter payslip values. System/config/attendance/KPI values are retained as initial suggestions, but do not lock the Admin form; saving uses the exact displayed Admin draft. This authorization changes the Admin input behavior only, without changing formulas, source aggregation, employee access, schema or API contract.
 
 - 2026-09-08 — Opening an eligible operational shift must not depend on Realtime delivery. Keep all existing server-backed eligibility gates and idempotency, but make Today explicitly invoke reconciliation on entry, read back the session, expose the actual skip/error reason, and allow a bounded manual retry. Realtime remains only an acceleration path; it is not authoritative state or a prerequisite for creating the session.

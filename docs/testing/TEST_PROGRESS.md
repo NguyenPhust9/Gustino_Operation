@@ -1,5 +1,20 @@
 # Test Progress
 
+## 2026-10-09 — Production employee payslip read restored
+- Before SQL, the active Đình Phát auth user ID exactly matched the payroll `employee_id`, but an employee-scoped published-payslip SELECT returned zero rows while Admin could see the September row.
+- User applied the narrow own-published-payslip SELECT policy and authenticated-table SELECT grant in Supabase SQL Editor.
+- Post-apply read-only verification with Đình Phát's actual employee session returns the September payslip with no query error and a populated net salary. RLS incident is resolved; no other employee/data mutation was performed by verification.
+
+## 2026-10-09 — Payslip notification history and ordering
+- User clarified that viewing a payslip marks its notification as read but must not remove it. New/unread notifications must appear first.
+- Dropdown now retains viewed notifications, labels viewed/unread state, sorts unread first and then newest publication first; badge remains the unread count only. Backend own-payslip read orders by `published_at` descending.
+- Payslip delivery/confirmation/viewed/revoke/Admin-edit regressions, TypeScript and the full 733-module production build/bundle guard pass (`index-BZ0axhOE.js`). No database/data/deployment change.
+
+## 2026-10-09 — Production payslip period correction
+- Read-only audit found one same-timestamp published batch of 38 payslips in `2026-10`, plus one existing `2026-09` conflict for Trần Minh Lý.
+- User confirmed the existing September row was test data and explicitly authorized replacement. Deleted only that conflicting test row, changed the exact 38 audited IDs from `2026-10` to `2026-09`, and preserved their salary values/publication metadata.
+- Post-write verification passed: 0/38 audited IDs remain in October and 38/38 exist in September. No other payroll rows, schema, formulas or employee records changed.
+
 ## 2026-10-09 — MOD-07 Admin editable payslip
 - Confirmed from `PayrollPage.tsx`: system-derived salary fields used `readOnly`; save also discarded Admin edits to overtime hours and KPI bonus when source data existed.
 - Fixed locally: system/config/attendance/KPI values remain initial suggestions, while Admin can edit every payslip value and the save payload persists the displayed overtime/KPI values.
