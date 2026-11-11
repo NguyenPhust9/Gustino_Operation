@@ -17,11 +17,14 @@ jobs:
       github.event.deployment.ref == 'main' &&
       github.event.deployment.environment == 'Production'
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Point the public URL to this production deployment
+        if: env.VERCEL_TOKEN != ''
         run: >-
           npx --yes vercel@54.21.1 alias set
           "${{ github.event.deployment_status.target_url }}"
           gustino-operations.vercel.app
           --scope phu2
-          --token "${{ secrets.VERCEL_TOKEN }}"
+          --token "$VERCEL_TOKEN"
