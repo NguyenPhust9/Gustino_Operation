@@ -47,12 +47,9 @@ interface AttendanceFilters {
 const ATTENDANCE_PAGE_SIZE = 500
 
 export const DEFAULT_WORK_SHIFT_TEMPLATES: Array<Pick<WorkShift, 'name' | 'startTime' | 'endTime' | 'employmentTypes'>> = [
-  { name: 'Ca 1', startTime: '07:00', endTime: '14:30', employmentTypes: ['leader', 'full_time'] },
-  { name: 'Ca 2', startTime: '14:30', endTime: '22:00', employmentTypes: ['leader', 'full_time'] },
   { name: 'Ca 1 07:00-15:00', startTime: '07:00', endTime: '15:00', employmentTypes: ['leader', 'full_time'] },
+  { name: 'Ca 2 15:00-21:00', startTime: '15:00', endTime: '21:00', employmentTypes: ['leader', 'full_time'] },
   { name: 'Ca 2 14:00-22:00', startTime: '14:00', endTime: '22:00', employmentTypes: ['leader', 'full_time'] },
-  { name: 'Ca PT sáng', startTime: '09:00', endTime: '13:00', employmentTypes: ['part_time'] },
-  { name: 'Ca PT chiều', startTime: '16:00', endTime: '22:00', employmentTypes: ['part_time'] },
 ]
 
 export function canManageShiftSetup(user: AppUser) {
@@ -492,18 +489,15 @@ export async function ensureCurrentDefaultWorkShifts(user: AppUser, branch: Bran
   if (user.role === 'admin') await syncBranchToCloud(user, branch)
 
   let current = (await fetchWorkShifts(user)).filter((shift) => shift.branchId === branch.id && shift.active !== false)
-  const desiredTimes = new Set(['07:00-14:30', '14:30-22:00', '07:00-15:00', '14:00-22:00', '09:00-13:00', '16:00-21:00'])
+  const desiredTimes = new Set(['07:00-15:00', '15:00-21:00', '14:00-22:00'])
   const obsoleteShifts = current.filter((shift) => !desiredTimes.has(`${shift.startTime}-${shift.endTime}`))
   for (const shift of obsoleteShifts) await archiveWorkShift(user, shift.id)
 
   current = (await fetchWorkShifts(user)).filter((shift) => shift.branchId === branch.id && shift.active !== false)
   const desired = [
-    { name: 'Ca 1 mới', startTime: '07:00', endTime: '14:30', employmentTypes: ['leader', 'full_time'] as EmploymentType[] },
-    { name: 'Ca 2 mới', startTime: '14:30', endTime: '22:00', employmentTypes: ['leader', 'full_time'] as EmploymentType[] },
     { name: 'Ca 1 07:00-15:00', startTime: '07:00', endTime: '15:00', employmentTypes: ['leader', 'full_time'] as EmploymentType[] },
+    { name: 'Ca 2 15:00-21:00', startTime: '15:00', endTime: '21:00', employmentTypes: ['leader', 'full_time'] as EmploymentType[] },
     { name: 'Ca 2 14:00-22:00', startTime: '14:00', endTime: '22:00', employmentTypes: ['leader', 'full_time'] as EmploymentType[] },
-    { name: 'Ca PT sáng', startTime: '09:00', endTime: '13:00', employmentTypes: ['part_time'] as EmploymentType[] },
-    { name: 'Ca PT chiều', startTime: '16:00', endTime: '21:00', employmentTypes: ['part_time'] as EmploymentType[] },
   ]
   for (const template of desired) {
     if (current.some((shift) => shift.startTime === template.startTime && shift.endTime === template.endTime)) continue
