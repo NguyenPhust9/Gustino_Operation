@@ -1,0 +1,27 @@
+name: Point primary Vercel URL at production
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  update-primary-alias:
+    # Vercel publishes a deployment status to GitHub after its main-branch
+    # production build succeeds. Preview deployments and failed builds never
+    # move the customer-facing URL.
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.ref == 'main' &&
+      github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Point the public URL to this production deployment
+        run: >-
+          npx --yes vercel@54.21.1 alias set
+          "${{ github.event.deployment_status.target_url }}"
+          gustino-operations.vercel.app
+          --scope phu2
+          --token "${{ secrets.VERCEL_TOKEN }}"
