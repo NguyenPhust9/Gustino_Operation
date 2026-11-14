@@ -27,6 +27,7 @@ interface OrderDraftLine {
   quantity: string
   unit: string
   note: string
+  specificationHint: string
 }
 
 type OrderStatusFilter = 'all' | SupplyRequest['status']
@@ -37,6 +38,7 @@ const emptyOrderLine = (): OrderDraftLine => ({
   quantity: '',
   unit: 'kg',
   note: '',
+  specificationHint: '',
 })
 
 export function OrdersPage({ user }: Props) {
@@ -149,6 +151,7 @@ export function OrdersPage({ user }: Props) {
     updateLine(id, {
       productName: selected?.name || value,
       unit: selected?.inboundUnit || selected?.unit || lines.find((line) => line.id === id)?.unit || 'kg',
+      specificationHint: selected?.orderSpecificationHint || '',
     })
   }
 
@@ -305,7 +308,7 @@ export function OrdersPage({ user }: Props) {
             </div>
             <div className="order-entry-table page-order-lines">
               <div className="order-entry-head" aria-hidden="true">
-                <span>#</span><span>Hàng cần đặt</span><span>Số lượng</span><span>Đơn vị</span><span>Ghi chú</span><span></span>
+                <span>#</span><span>Hàng cần đặt</span><span>Gợi ý quy cách</span><span>Số lượng</span><span>Đơn vị</span><span>Ghi chú</span><span></span>
               </div>
               {lines.map((line, index) => (
                 <div className="order-entry-row" key={line.id}>
@@ -320,6 +323,10 @@ export function OrdersPage({ user }: Props) {
                       required={index === 0}
                     />
                   </label>
+                  <div className="order-entry-specification" title={line.specificationHint || undefined}>
+                    <span>Gợi ý quy cách</span>
+                    {line.specificationHint || '—'}
+                  </div>
                   <label className="order-entry-quantity"><span>Số lượng</span>
                       <input
                         type="number"

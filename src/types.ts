@@ -234,6 +234,8 @@ export interface Product {
   inboundPackKg?: number
   inboundUnit?: string
   inboundPackQuantity?: number
+  /** Gợi ý quy cách hiển thị khi nhân viên lập phiếu đặt hàng. */
+  orderSpecificationHint?: string
 }
 
 export interface ProductRecipeLine {

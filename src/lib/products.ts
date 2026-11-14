@@ -25,6 +25,7 @@ interface ProductRow {
   inbound_unit: string | null
   inbound_pack_kg: number | null
   inbound_pack_quantity: number | null
+  order_specification_hint: string | null
   recipe: ProductRecipeLine[] | null
   deleted_at: string | null
 }
@@ -45,6 +46,7 @@ function rowToProduct(row: ProductRow): ConfiguredProduct {
     inboundUnit: row.inbound_unit || undefined,
     inboundPackKg: row.inbound_pack_kg ? Number(row.inbound_pack_kg) : undefined,
     inboundPackQuantity: row.inbound_pack_quantity ? Number(row.inbound_pack_quantity) : undefined,
+    orderSpecificationHint: row.order_specification_hint || undefined,
     recipe: Array.isArray(row.recipe) && row.recipe.length ? row.recipe : undefined,
     deletedAt: row.deleted_at || undefined,
   }
@@ -66,6 +68,7 @@ function productToRow(product: ConfiguredProduct) {
     inbound_unit: product.inboundUnit ?? null,
     inbound_pack_kg: product.inboundPackKg ?? null,
     inbound_pack_quantity: product.inboundPackQuantity ?? null,
+    order_specification_hint: product.orderSpecificationHint?.trim() || null,
     recipe: product.recipe?.length ? product.recipe : null,
     deleted_at: product.deletedAt ?? null,
     updated_at: new Date().toISOString(),

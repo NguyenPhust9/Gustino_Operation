@@ -120,6 +120,7 @@ export function ControlCenterPage({ user }: { user: AppUser }) {
     lowStock: '5',
     inboundUnit: '',
     inboundPackSize: '',
+    orderSpecificationHint: '',
   })
   const [editingProductId, setEditingProductId] = useState('')
   const [menuDraft, setMenuDraft] = useState({
@@ -355,6 +356,7 @@ export function ControlCenterPage({ user }: { user: AppUser }) {
       inboundUnit: productDraft.inboundUnit.trim() || undefined,
       inboundPackKg: unit === 'kg' && inboundPackSize > 0 ? inboundPackSize : undefined,
       inboundPackQuantity: unit !== 'kg' && inboundPackSize > 0 ? inboundPackSize : undefined,
+      orderSpecificationHint: productDraft.orderSpecificationHint.trim() || undefined,
     }
     const next = editingProduct
       ? products.map((item) => item.id === editingProduct.id ? product : item)
@@ -365,7 +367,7 @@ export function ControlCenterPage({ user }: { user: AppUser }) {
 
   function resetProductDraft() {
     setEditingProductId('')
-    setProductDraft({ sku: '', name: '', category: 'raw', unit: 'kg', lowStock: '5', inboundUnit: '', inboundPackSize: '' })
+    setProductDraft({ sku: '', name: '', category: 'raw', unit: 'kg', lowStock: '5', inboundUnit: '', inboundPackSize: '', orderSpecificationHint: '' })
   }
 
   function editProduct(product: ConfigProduct) {
@@ -378,6 +380,7 @@ export function ControlCenterPage({ user }: { user: AppUser }) {
       lowStock: String(product.lowStock || 0),
       inboundUnit: product.inboundUnit || '',
       inboundPackSize: product.inboundPackKg ? String(product.inboundPackKg) : product.inboundPackQuantity ? String(product.inboundPackQuantity) : '',
+      orderSpecificationHint: product.orderSpecificationHint || '',
     })
     setMasterFeedback(`Đang sửa SKU ${product.sku}. Giữ nguyên mã nếu SKU đã có giao dịch kho.`)
   }
@@ -915,6 +918,7 @@ export function ControlCenterPage({ user }: { user: AppUser }) {
               <input inputMode="numeric" value={productDraft.lowStock} onChange={(event) => setProductDraft({ ...productDraft, lowStock: cleanMoneyInput(event.target.value) })} placeholder="Tồn tối thiểu" />
               <input value={productDraft.inboundUnit} onChange={(event) => setProductDraft({ ...productDraft, inboundUnit: event.target.value })} placeholder="Đơn vị nhập: túi/thùng" />
               <input inputMode="decimal" value={productDraft.inboundPackSize} onChange={(event) => setProductDraft({ ...productDraft, inboundPackSize: event.target.value.replace(',', '.') })} placeholder={`1 ${productDraft.inboundUnit || 'đv nhập'} = ? ${productDraft.unit || 'đv trừ'}`} />
+              <input value={productDraft.orderSpecificationHint} onChange={(event) => setProductDraft({ ...productDraft, orderSpecificationHint: event.target.value })} placeholder="Gợi ý quy cách đặt: VD thùng 24 chai / bao 25 kg" />
               <button className="primary-button">{editingProductId ? 'Lưu SKU' : 'Thêm SKU'}</button>
               {editingProductId && <button type="button" className="secondary-button" onClick={resetProductDraft}>Hủy sửa</button>}
             </form>
