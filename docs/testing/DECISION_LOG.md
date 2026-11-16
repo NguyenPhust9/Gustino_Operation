@@ -446,3 +446,5 @@
 
 ### Owner-authorized release scope
 - User explicitly asks to push. Include egress implementation and verified adjacent new-project session isolation/modern server-key handling/bundle guard with their tests and evidence. Keep private backups/environment data, local Supabase linking state, unrelated branch changes and recovery-only utilities outside this release. Push the existing origin main after staged inspection; do not force-push or replay database migrations.
+
+- Release b828aca pushed and independently verified on origin/main. Keep GitHub delivery separate from Vercel readiness: this turn establishes the remote commit, not completion of an automatic hosting build or measured production egress reduction.
