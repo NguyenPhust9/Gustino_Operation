@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const [admin, styles] = await Promise.all([
+const [admin, styles, browser] = await Promise.all([
   readFile(new URL('../src/pages/AdminPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  readFile(new URL('../src/lib/browser.ts', import.meta.url), 'utf8'),
 ])
 
 assert.match(admin, /useState<'daily' \| 'monthly' \| 'leaders'>\('daily'\)/, 'Thiếu trạng thái phân loại bảng thi đua.')
@@ -22,9 +23,10 @@ assert.match(admin, /value="daily">Theo ngày</, 'Thiếu phân loại thi đua 
 assert.match(admin, /value="monthly">Theo tháng</, 'Thiếu phân loại thi đua theo tháng.')
 assert.match(admin, /value="leaders">Ca trưởng theo tháng</, 'Thiếu phân loại thi đua ca trưởng.')
 assert.match(admin, /className=\{`competition-classification-table\$\{showReward \? ' with-reward' : ''\}`\}/, 'Thiếu bảng thi đua dùng chung cho các phân loại và biến thể cột thưởng.')
-assert.match(admin, /window\.addEventListener\('focus', refreshWhenActive\)/, 'Trang quản lý chưa làm mới khi quay lại tab.')
-assert.match(admin, /document\.addEventListener\('visibilitychange', refreshWhenVisible\)/, 'Trang quản lý chưa làm mới khi tab hiện lại.')
-assert.match(admin, /window\.setInterval\(refreshWhenActive, 30000\)/, 'Trang quản lý thiếu nhịp kiểm tra dự phòng khi realtime gián đoạn.')
+assert.match(admin, /watchVisibleData\(\(\) => refresh\(false\)/, 'Trang quản lý phải dùng bộ đồng bộ theo trạng thái tab/socket.')
+assert.match(browser, /window\.addEventListener\('focus', resume\)/, 'Phải làm mới khi quay lại tab.')
+assert.match(browser, /document\.addEventListener\('visibilitychange', resume\)/, 'Phải làm mới khi tab hiện lại.')
+assert.match(browser, /!connected \|\| Date\.now\(\) - lastStarted >= reconcileMs/, 'Phải có kiểm tra dự phòng khi realtime gián đoạn và đối soát định kỳ.')
 assert.match(styles, /\.competition-classification-table/, 'Thiếu CSS bảng phân loại thi đua.')
 assert.match(styles, /\.competition-ranking-controls/, 'Thiếu CSS bộ lọc thi đua responsive.')
 

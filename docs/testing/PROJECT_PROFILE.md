@@ -1,5 +1,7 @@
 # Project Profile
 
+- 2026-11-16 MOD-20: dashboard reads now use readCache.ts/dashboardData.ts for per-user/role/branch/range sharing, complete stock baseline plus reconciled deltas and bounded snapshot periods. Manager/Admin use visible socket-aware scheduling; Manager serializes actual request groups. Mutation validation, historical stock and business formulas are retained. Behavior regressions, TypeScript and final production build pass; hosted release and production-byte measurements remain pending.
+
 - 2026-08-03 local MOD-06 reliability state: Attendance uses one Vietnam business-date source, treats any own open record or pending/unknown outbox state as authoritative before rendering a new action, waits for IndexedDB transaction commit, versions/deadlines AppShell reads, scopes/coalesces realtime and bounds Board data to the viewed week. LAN builds attendance identity from session+registration, preserves validated offline timestamps and reuses one namespaced selfie path. Full post-hardening attendance/load batch is 19/19 green; TypeScript and final 719-module build pass (`AttendancePage-Cs_zPtp1.js`). No deploy/schema/production mutation occurred; Browser multi-context and physical GPS/camera remain pending.
 
 Last updated: 2026-07-22

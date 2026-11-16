@@ -4,6 +4,7 @@ import { isDuplicateKey, isMissingRpc, isMissingUniqueConstraint, userHeaders } 
 import { localDateKey, localDayBoundsIso } from './dates'
 import { roundQuantity } from './inventoryEntry'
 import { shouldUseLanApi, supabase } from './supabase'
+import { clearReadCache, invalidateReadCache } from './readCache'
 import type { AppUser, InventoryReport, OperationDay, ReportSnapshot, StockLine, StockMovement } from '../types'
 
 const USER_KEY = 'gustino_user_v1'
@@ -23,6 +24,7 @@ export function loadLocalUser(): AppUser | null {
 }
 
 export function saveLocalUser(user: AppUser | null) {
+  if (!user) clearReadCache()
   try {
     if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
     else localStorage.removeItem(USER_KEY)
@@ -200,25 +202,29 @@ export async function fetchMovementsDelta(
 }
 
 export async function addMovement(item: StockMovement, user?: AppUser): Promise<void> {
-  if (shouldUseLanApi(user)) {
-    await lanApi('/movements', { method: 'POST', body: JSON.stringify(item) })
-    return
+  try {
+    if (shouldUseLanApi(user)) {
+      await lanApi('/movements', { method: 'POST', body: JSON.stringify(item) })
+      return
+    }
+    const { error } = await supabase!.from('stock_movements').insert({
+      id: item.id,
+      branch_id: item.branchId,
+      product_id: item.productId,
+      movement_type: item.type,
+      quantity: item.quantity,
+      shift_date: item.shiftDate,
+      note: item.note,
+      created_by: item.createdBy,
+      source_product_id: item.sourceProductId ?? null,
+      source_quantity: item.sourceQuantity ?? null,
+      document_id: item.documentId ?? null,
+      measured_weight_kg: item.measuredWeightKg ?? null,
+    })
+    if (error) throw error
+  } finally {
+    invalidateReadCache('stock_movements', item.branchId)
   }
-  const { error } = await supabase!.from('stock_movements').insert({
-    id: item.id,
-    branch_id: item.branchId,
-    product_id: item.productId,
-    movement_type: item.type,
-    quantity: item.quantity,
-    shift_date: item.shiftDate,
-    note: item.note,
-    created_by: item.createdBy,
-    source_product_id: item.sourceProductId ?? null,
-    source_quantity: item.sourceQuantity ?? null,
-    document_id: item.documentId ?? null,
-    measured_weight_kg: item.measuredWeightKg ?? null,
-  })
-  if (error) throw error
 }
 
 export async function addMovements(
@@ -226,54 +232,58 @@ export async function addMovements(
   user?: AppUser,
   options?: { allowInsufficientStock?: boolean },
 ): Promise<void> {
-  // Phiếu rỗng không được đi tới RPC: create_stock_movements_checked raise
-  // 'Phiếu không có dòng dữ liệu' — thông báo khó hiểu cho người dùng cuối.
-  if (!items.length) return
-  const invalid = items.find((item) => !Number.isFinite(item.quantity) || item.quantity < 0)
-  if (invalid) throw new Error('Số lượng trên phiếu không hợp lệ (phải là số ≥ 0).')
-  if (shouldUseLanApi(user)) {
-    await lanApi('/movements', { method: 'POST', body: JSON.stringify(items) })
-    return
+  try {
+    // Phiếu rỗng không được đi tới RPC: create_stock_movements_checked raise
+    // 'Phiếu không có dòng dữ liệu' — thông báo khó hiểu cho người dùng cuối.
+    if (!items.length) return
+    const invalid = items.find((item) => !Number.isFinite(item.quantity) || item.quantity < 0)
+    if (invalid) throw new Error('Số lượng trên phiếu không hợp lệ (phải là số ≥ 0).')
+    if (shouldUseLanApi(user)) {
+      await lanApi('/movements', { method: 'POST', body: JSON.stringify(items) })
+      return
+    }
+    const rows = items.map((item) => ({
+      id: item.id,
+      branch_id: item.branchId,
+      product_id: item.productId,
+      movement_type: item.type,
+      quantity: item.quantity,
+      shift_date: item.shiftDate,
+      note: item.note,
+      created_by: item.createdBy,
+      source_product_id: item.sourceProductId ?? null,
+      source_quantity: item.sourceQuantity ?? null,
+      document_id: item.documentId ?? null,
+      measured_weight_kg: item.measuredWeightKg ?? null,
+    }))
+    // The operator already confirmed this exceptional negative-stock write in the
+    // calling UI. Avoid an expected HTTP 400 before the approved direct write.
+    if (options?.allowInsufficientStock) {
+      await insertStockRowsDirect(rows)
+      return
+    }
+    const { error } = await supabase!.rpc('create_stock_movements_checked', { p_items: rows })
+    if (error) {
+      // Các loại này vốn được phép ghi âm tồn (bán/hủy/kiểm kê/điều chỉnh).
+      // `allowInsufficientStock` = user đã bấm "vẫn tiếp tục" (vd chưa nhập kho nhưng vẫn ghi mẻ) → cho ghi thẳng.
+      const canBypassStockCheck = items.every((item) =>
+        ['sale_out', 'waste', 'count', 'adjustment'].includes(item.type),
+      )
+      const isStockCheckConflict = String(error.message || '').includes('Không đủ tồn')
+        || String((error as any).code || '') === 'P0001'
+      if (!canBypassStockCheck || !isStockCheckConflict) throw error
+      await insertStockRowsDirect(rows)
+      return
+    }
+    // RPC trả `void`: gọi xong không có gì chứng minh dòng đã nằm trong bảng. Một
+    // phiếu "lưu thành công" nhưng máy chủ trống là nguyên nhân kinh điển của báo
+    // lỗi "kho không đồng bộ" — máy vừa ghi hiện số mới (nó tự tính lại tại chỗ),
+    // mọi máy khác đọc từ DB nên vẫn hiện số cũ, và không ai thấy thông báo lỗi.
+    // Một lượt đếm cho cả phiếu là đủ rẻ để đổi lấy việc lỗi hiện ra ngay.
+    await assertMovementsPersisted(rows.map((row) => row.id))
+  } finally {
+    for (const branchId of new Set(items.map((item) => item.branchId))) invalidateReadCache('stock_movements', branchId)
   }
-  const rows = items.map((item) => ({
-    id: item.id,
-    branch_id: item.branchId,
-    product_id: item.productId,
-    movement_type: item.type,
-    quantity: item.quantity,
-    shift_date: item.shiftDate,
-    note: item.note,
-    created_by: item.createdBy,
-    source_product_id: item.sourceProductId ?? null,
-    source_quantity: item.sourceQuantity ?? null,
-    document_id: item.documentId ?? null,
-    measured_weight_kg: item.measuredWeightKg ?? null,
-  }))
-  // The operator already confirmed this exceptional negative-stock write in the
-  // calling UI. Avoid an expected HTTP 400 before the approved direct write.
-  if (options?.allowInsufficientStock) {
-    await insertStockRowsDirect(rows)
-    return
-  }
-  const { error } = await supabase!.rpc('create_stock_movements_checked', { p_items: rows })
-  if (error) {
-    // Các loại này vốn được phép ghi âm tồn (bán/hủy/kiểm kê/điều chỉnh).
-    // `allowInsufficientStock` = user đã bấm "vẫn tiếp tục" (vd chưa nhập kho nhưng vẫn ghi mẻ) → cho ghi thẳng.
-    const canBypassStockCheck = items.every((item) =>
-      ['sale_out', 'waste', 'count', 'adjustment'].includes(item.type),
-    )
-    const isStockCheckConflict = String(error.message || '').includes('Không đủ tồn')
-      || String((error as any).code || '') === 'P0001'
-    if (!canBypassStockCheck || !isStockCheckConflict) throw error
-    await insertStockRowsDirect(rows)
-    return
-  }
-  // RPC trả `void`: gọi xong không có gì chứng minh dòng đã nằm trong bảng. Một
-  // phiếu "lưu thành công" nhưng máy chủ trống là nguyên nhân kinh điển của báo
-  // lỗi "kho không đồng bộ" — máy vừa ghi hiện số mới (nó tự tính lại tại chỗ),
-  // mọi máy khác đọc từ DB nên vẫn hiện số cũ, và không ai thấy thông báo lỗi.
-  // Một lượt đếm cho cả phiếu là đủ rẻ để đổi lấy việc lỗi hiện ra ngay.
-  await assertMovementsPersisted(rows.map((row) => row.id))
 }
 
 /** Xác nhận các dòng vừa ghi đã thực sự có trên máy chủ. Ném lỗi nếu thiếu. */
@@ -317,35 +327,39 @@ async function insertStockRowsDirect(rows: Array<{
 }
 
 export async function deleteMovements(branchId: string, movementIds: string[], user?: AppUser): Promise<void> {
-  if (!movementIds.length) return
-  if (shouldUseLanApi(user)) {
-    await lanApi(`/movements?branchId=${encodeURIComponent(branchId)}`, {
-      method: 'DELETE',
-      body: JSON.stringify({ ids: movementIds }),
-    })
-    return
-  }
-  // `.select()` là BẮT BUỘC, không phải để lấy dữ liệu về.
-  //
-  // PostgREST trả `error = null` cho lệnh xoá không khớp dòng nào — kể cả khi RLS
-  // đã lọc sạch hoặc `branchId` truyền vào không phải chi nhánh của phiếu. Không
-  // có `.select()` thì lớp gọi không phân biệt được "đã xoá" với "không xoá được
-  // dòng nào", màn Kho báo "Đã xóa …" trong khi máy chủ không đổi gì → máy khác
-  // vẫn hiện số cũ và người dùng kết luận app không đồng bộ.
-  const { data, error } = await supabase!
-    .from('stock_movements')
-    .delete()
-    .eq('branch_id', branchId)
-    .in('id', movementIds)
-    .select('id')
-  if (error) throw error
-  const removed = data?.length ?? 0
-  if (removed < movementIds.length) {
-    throw new Error(
-      removed === 0
-        ? 'Máy chủ không xóa được dòng nào (thiếu quyền hoặc phiếu thuộc chi nhánh khác). Dữ liệu kho chưa thay đổi.'
-        : `Chỉ xóa được ${removed}/${movementIds.length} dòng của chứng từ. Tải lại trang và kiểm tra lại sổ kho.`,
-    )
+  try {
+    if (!movementIds.length) return
+    if (shouldUseLanApi(user)) {
+      await lanApi(`/movements?branchId=${encodeURIComponent(branchId)}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ ids: movementIds }),
+      })
+      return
+    }
+    // `.select()` là BẮT BUỘC, không phải để lấy dữ liệu về.
+    //
+    // PostgREST trả `error = null` cho lệnh xoá không khớp dòng nào — kể cả khi RLS
+    // đã lọc sạch hoặc `branchId` truyền vào không phải chi nhánh của phiếu. Không
+    // có `.select()` thì lớp gọi không phân biệt được "đã xoá" với "không xoá được
+    // dòng nào", màn Kho báo "Đã xóa …" trong khi máy chủ không đổi gì → máy khác
+    // vẫn hiện số cũ và người dùng kết luận app không đồng bộ.
+    const { data, error } = await supabase!
+      .from('stock_movements')
+      .delete()
+      .eq('branch_id', branchId)
+      .in('id', movementIds)
+      .select('id')
+    if (error) throw error
+    const removed = data?.length ?? 0
+    if (removed < movementIds.length) {
+      throw new Error(
+        removed === 0
+          ? 'Máy chủ không xóa được dòng nào (thiếu quyền hoặc phiếu thuộc chi nhánh khác). Dữ liệu kho chưa thay đổi.'
+          : `Chỉ xóa được ${removed}/${movementIds.length} dòng của chứng từ. Tải lại trang và kiểm tra lại sổ kho.`,
+      )
+    }
+  } finally {
+    invalidateReadCache('stock_movements', branchId)
   }
 }
 
@@ -485,63 +499,67 @@ export function sumStockAdjustments(
 }
 
 export async function saveReportSnapshot(user: AppUser, payload: Record<string, unknown>) {
-  const reportDate = typeof payload.reportDate === 'string'
-    ? payload.reportDate
-    : localDateKey()
-  const finalizedPayload = {
-    ...payload,
-    reportDate,
-    finalizedBy: user.id,
-    finalizedByName: user.name,
-    finalizedAt: new Date().toISOString(),
-  }
-  const snapshot = {
-    id: createId(),
-    branch_id: user.branchId,
-    report_date: reportDate,
-    created_by: user.id,
-    payload: finalizedPayload,
-  }
-  if (shouldUseLanApi(user)) {
-    await lanApi('/report-snapshots', { method: 'POST', body: JSON.stringify(snapshot) })
-    return
-  }
-  const { error } = await supabase!.from('report_snapshots').upsert(snapshot, {
-    onConflict: 'branch_id,report_date',
-    ignoreDuplicates: false,
-  })
-  if (!error) return
-  if (!isMissingUniqueConstraint(error)) throw error
+  try {
+    const reportDate = typeof payload.reportDate === 'string'
+      ? payload.reportDate
+      : localDateKey()
+    const finalizedPayload = {
+      ...payload,
+      reportDate,
+      finalizedBy: user.id,
+      finalizedByName: user.name,
+      finalizedAt: new Date().toISOString(),
+    }
+    const snapshot = {
+      id: createId(),
+      branch_id: user.branchId,
+      report_date: reportDate,
+      created_by: user.id,
+      payload: finalizedPayload,
+    }
+    if (shouldUseLanApi(user)) {
+      await lanApi('/report-snapshots', { method: 'POST', body: JSON.stringify(snapshot) })
+      return
+    }
+    const { error } = await supabase!.from('report_snapshots').upsert(snapshot, {
+      onConflict: 'branch_id,report_date',
+      ignoreDuplicates: false,
+    })
+    if (!error) return
+    if (!isMissingUniqueConstraint(error)) throw error
 
-  const { data: existing, error: readError } = await supabase!
-    .from('report_snapshots')
-    .select('id')
-    .eq('branch_id', user.branchId)
-    .eq('report_date', reportDate)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (readError) throw readError
-  if (existing?.id) {
-    const { error: updateError } = await supabase!
+    const { data: existing, error: readError } = await supabase!
       .from('report_snapshots')
-      .update({ payload: finalizedPayload, created_by: user.id })
-      .eq('id', existing.id)
-    if (updateError) throw updateError
-    return
-  }
-
-  const { error: insertError } = await supabase!.from('report_snapshots').insert(snapshot)
-  if (isDuplicateKey(insertError)) {
-    const { error: updateError } = await supabase!
-      .from('report_snapshots')
-      .update({ payload: finalizedPayload, created_by: user.id })
+      .select('id')
       .eq('branch_id', user.branchId)
       .eq('report_date', reportDate)
-    if (updateError) throw updateError
-    return
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (readError) throw readError
+    if (existing?.id) {
+      const { error: updateError } = await supabase!
+        .from('report_snapshots')
+        .update({ payload: finalizedPayload, created_by: user.id })
+        .eq('id', existing.id)
+      if (updateError) throw updateError
+      return
+    }
+
+    const { error: insertError } = await supabase!.from('report_snapshots').insert(snapshot)
+    if (isDuplicateKey(insertError)) {
+      const { error: updateError } = await supabase!
+        .from('report_snapshots')
+        .update({ payload: finalizedPayload, created_by: user.id })
+        .eq('branch_id', user.branchId)
+        .eq('report_date', reportDate)
+      if (updateError) throw updateError
+      return
+    }
+    if (insertError) throw insertError
+  } finally {
+    invalidateReadCache('report_snapshots', user.branchId)
   }
-  if (insertError) throw insertError
 }
 
 export async function fetchReportSnapshots(

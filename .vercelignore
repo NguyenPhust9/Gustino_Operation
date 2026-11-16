@@ -1,6 +1,9 @@
 # Archived repository material is not part of the production application.
 supabase.zip
 
+# Private local database backups must never be deployed.
+artifacts/database-backups/
+
 # Local npm cache is not part of the production application.
 .npm-cache
 

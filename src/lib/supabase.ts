@@ -57,7 +57,7 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        storageKey: 'gustino_supabase_auth_v1',
+        storageKey: `gustino_supabase_auth_v1:${new URL(url!).hostname}`,
       },
     })
   : null

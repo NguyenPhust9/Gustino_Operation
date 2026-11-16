@@ -1,6 +1,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AppShell, type InventoryTab, type Page } from './components/AppShell'
-import { fetchMovements, fetchMovementsDelta, loadLocalUser, saveLocalUser } from './lib/store'
+import { fetchMovementsDelta, loadLocalUser, saveLocalUser } from './lib/store'
+import { fetchDashboardMovements, invalidateDashboardEvent } from './lib/dashboardData'
 import { reconcileOperationalShift } from './lib/shiftAutoOpen'
 import { flushAttendanceOutbox } from './lib/attendance'
 import { attendanceOutboxSendableFastCount } from './lib/attendanceOutbox'
@@ -90,7 +91,7 @@ function App() {
       setMovementsStatus('loading')
     }
     try {
-      const data = await fetchMovements(user.branchId, user)
+      const data = await fetchDashboardMovements(user.branchId, user)
       movementSyncRef.current = {
         branchId: user.branchId,
         latestCreatedAt: latestMovementStamp(data, ''),
@@ -311,9 +312,14 @@ function App() {
         schema: 'public',
         table: 'stock_movements',
       }, (payload) => {
-        if (payload.eventType === 'DELETE') return bumpFull()
+        if (payload.eventType === 'DELETE') {
+          invalidateDashboardEvent('stock_movements', payload)
+          return bumpFull()
+        }
         const branchId = (payload.new as { branch_id?: string } | null)?.branch_id
         if (branchId && branchId !== user.branchId) return
+        invalidateDashboardEvent('stock_movements', payload)
+        if (payload.eventType === 'UPDATE') return bumpFull()
         bumpDelta()
       })
       .on('postgres_changes', {

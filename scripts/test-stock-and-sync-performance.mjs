@@ -152,7 +152,7 @@ assert.match(storeSource, /fetchMovementPagesParallel/, 'Tải sổ kho phải p
 // Realtime gộp burst ở các màn nghe bảng dòng hàng (bảng này không lọc được chi nhánh).
 for (const page of ['SalesPage', 'ShiftHandoverPage', 'TodayPage', 'ManagerDashboardPage']) {
   const source = await readFile(new URL(`../src/pages/${page}.tsx`, import.meta.url), 'utf8')
-  assert.match(source, /burstGuard\(/, `${page} phải gộp burst realtime`)
+  assert.match(source, /(?:burstGuard|watchVisibleData)\(/, `${page} phải gộp burst realtime`)
 }
 
 console.log('OK — tồn kho giữ nguyên kết quả, đồng bộ nền nhẹ hơn.')

@@ -92,6 +92,20 @@ try {
   const dayPatchIndex = calls.findIndex((call) => call.url.includes('/rest/v1/operation_days?id=eq.day-1') && call.init.method === 'PATCH')
   const snapshotPostIndex = calls.indexOf(snapshotPost)
   assert.ok(dayPatchIndex > snapshotPostIndex, 'operation day must close only after settlement/session/snapshot writes')
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer test-service-role-key', 'legacy JWT key keeps its Bearer header')
+
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_isolated-test-key'
+  let modernReads = 0
+  globalThis.fetch = async (_url, init) => {
+    modernReads += 1
+    assert.equal(init.headers.apikey, 'sb_secret_isolated-test-key')
+    assert.equal(new Headers(init.headers).has('Authorization'), false, 'secret API key is not a JWT Bearer token')
+    return jsonResponse([])
+  }
+  const modern = responseRecorder()
+  await handler({ method: 'GET', headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } }, modern)
+  assert.equal(modern.statusCode, 200)
+  assert.ok(modernReads > 0)
 
   console.log('AUTO_CLOSE_DAY_OK')
 } finally {

@@ -370,7 +370,7 @@ function nextDateKey(dateKey: string) {
 function createServiceClient(baseUrl: string, serviceRoleKey: string) {
   const baseHeaders = {
     apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
+    ...(!serviceRoleKey.startsWith('sb_secret_') ? { Authorization: `Bearer ${serviceRoleKey}` } : {}),
     'Content-Type': 'application/json',
   }
   async function request<T>(path: string, init: RequestInit = {}) {

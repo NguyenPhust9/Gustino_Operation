@@ -21,8 +21,20 @@ const bundles = await Promise.all(files.map(async (name) => ({
 })))
 
 const expectedHost = new URL(expectedUrl).host
+const embeddedProjects = new Set(bundles.flatMap((item) => [...item.source.matchAll(/https:\/\/([a-z0-9]{20})\.supabase\.co/g)].map((match) => match[1])))
+assert.deepEqual([...embeddedProjects], [expectedHost.split('.')[0]], 'production JS includes another Supabase project')
 const urlBundle = bundles.find((item) => item.source.includes(expectedUrl) || item.source.includes(expectedHost))
 const keyBundle = bundles.find((item) => item.source.includes(expectedAnonKey))
+for (const name of ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_TARGET_SERVICE_ROLE_KEY', 'SUPABASE_DB_PASSWORD', 'SUPABASE_TARGET_DB_PASSWORD']) {
+  const secret = process.env[name] || fileEnv[name]
+  if (secret) assert.ok(!bundles.some((item) => item.source.includes(secret)), `production JS contains server-only credential ${name}`)
+}
+assert.ok(!expectedAnonKey.startsWith('sb_secret_'), 'browser Supabase key must be public')
+if (expectedAnonKey.startsWith('eyJ')) {
+  const payload = JSON.parse(Buffer.from(expectedAnonKey.split('.')[1], 'base64url').toString('utf8'))
+  assert.equal(payload.role, 'anon', 'browser JWT key must be anon')
+  assert.equal(payload.ref, new URL(expectedUrl).hostname.split('.')[0], 'Supabase URL and JWT key refer to different projects')
+}
 const revenueBundle = bundles.find((item) => /^revenue-[\w-]+\.js$/.test(item.name))
 assert.ok(
   urlBundle,

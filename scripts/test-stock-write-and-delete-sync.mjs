@@ -64,6 +64,8 @@ async function loadStoreModule() {
     'const isMissingUniqueConstraint = () => false;',
     'const userHeaders = () => ({});',
     'const shouldUseLanApi = () => false;',
+    'const invalidateReadCache = (...args) => globalThis.__READ_CACHE_INVALIDATIONS__.push(args);',
+    'const clearReadCache = () => {};',
     'const supabase = globalThis.__FAKE_SUPABASE__;',
   ].join('\n') + '\n' + source
   const output = ts.transpileModule(source, {
@@ -74,6 +76,7 @@ async function loadStoreModule() {
 
 const fake = makeFakeSupabase()
 globalThis.__FAKE_SUPABASE__ = fake
+globalThis.__READ_CACHE_INVALIDATIONS__ = []
 const store = await loadStoreModule()
 
 const user = { id: 'u1', role: 'shift_leader', branchId: 'gold-coast' }
@@ -146,3 +149,4 @@ assert.ok(
 )
 
 console.log('STOCK_WRITE_AND_DELETE_SYNC_OK')
+assert.ok(globalThis.__READ_CACHE_INVALIDATIONS__.some(([table, branch]) => table === 'stock_movements' && branch === user.branchId), 'Stock write/delete attempts must invalidate background history even on partial failure')

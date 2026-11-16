@@ -127,10 +127,9 @@ await attendance.fetchWorkShifts({ ...user, id: 'u2' }, context)
 assert.equal(branchReads, 4, 'Contexts must not reuse another user scope')
 
 const admin = source('src/pages/AdminPage.tsx')
-const adminGuard = admin.match(/const reloadSoon = burstGuard\(\(\) => void refresh\(false\), 400\)/)[0]
-let adminReads = 0
-const triggerAdmin = new Function('burstGuard', 'refresh', `${adminGuard}; return reloadSoon`)(burstGuard, () => { adminReads++ })
-for (let i = 0; i < 20; i++) triggerAdmin()
-flushTimeouts(); assert.equal(adminReads, 1)
-triggerAdmin(); triggerAdmin.cancel(); flushTimeouts(); assert.equal(adminReads, 1, 'Scope cleanup cancels scheduled refresh')
+// Admin's old 400ms trailing debounce is superseded by the visible, bounded,
+// single-flight scheduler exercised behaviorally in test-dashboard-egress.mjs.
+assert.match(admin, /watchVisibleData\(\(\) => refresh\(false\)/)
+assert.match(admin, /invalidateDashboardEvent\(table, payload\)/)
+assert.match(admin, /reconciliation\.dispose\(\)/)
 console.log('SUPABASE_EGRESS_REFRESH_OK')

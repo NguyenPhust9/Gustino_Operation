@@ -54,3 +54,10 @@ Status: in progress. No case has been marked Passed unless execution evidence ap
 | 2026-07-11 | MOD02-TC-DB-02 static contract | `node scripts/test-authorization-active-guard.mjs` | Failed valid assertion: `current_profile`/latest `can_manage_branch` do not exclude inactive profiles, contrary to branch-deactivation old-session contract; BUG-002 confirmed |
 | 2026-07-11 | MOD02-TC-LAN-01 static contract | `node scripts/test-lan-auth-contract.mjs` | Failed valid assertion: invalid/missing token falls back to spoofable `X-User-Id`/`X-User-Role` identity; privileged routes such as branch PUT trust role without `authenticated`; BUG-003 confirmed |
 | 2026-07-11 | Final targeted regression | Four `node --check` commands + authorization static test + TypeScript no-emit | Passed; combined exit 0 in 10.9 s; `AUTH_STATIC_OK (22 routes đồng bộ qua type/hash/render/matrix)`; no diagnostics |
+
+
+## 2026-11-16 ? Quynh Nhu missing Orders triage
+- Source verified: AppShell orders visibility uses canUseOperations(role), restricted to shift_leader; position_title and employment_type do not grant permission. Admin profile employment group editor changes employmentType/positionTitle; role is a separate control in Account & security. Login reads profiles.role.
+- Account-specific cause remains unverified. Network audit failed EACCES; elevated read-only audit was rejected by automatic review because privileged credential-based access was not explicitly authorized. Do not bypass or retry without approval. No production profile rows were read or changed.
+- Additional source observation: App profile revalidation reads role but persists only branch/roaming changes, so restored sessions may retain an old role; a fresh login reads the current profile role. No application changes or tests performed. Preserve existing src/lib/branches.ts modification.
+- Next: user checks the actual account Role control and signs out/in; direct production read requires explicit approval. No permission/schema/deploy change.

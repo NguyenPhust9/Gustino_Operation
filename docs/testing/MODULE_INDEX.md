@@ -1,5 +1,7 @@
 # Business Module Index
 
+- 2026-11-16 MOD-20 egress implementation: readCache.ts, dashboardData.ts, browser.watchVisibleData and Manager/Admin/App/Report integration verified by test-dashboard-egress, related stock/revenue regressions, TypeScript and final build/public-key guard. Local fix verified; hosted release/measurement tracked in SESSION_HANDOFF.md. No production data/schema changes.
+
 Last updated: 2026-09-10. This is the source-backed inventory and remains subject to discovery refinement.
 
 | ID | Module | Primary source evidence | Risk | Status |

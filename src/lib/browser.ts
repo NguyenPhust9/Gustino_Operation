@@ -30,6 +30,63 @@ export function burstGuard(run: () => void, delayMs = 600): (() => void) & { can
   return Object.assign(trigger, { cancel: () => window.clearTimeout(timer) })
 }
 
+/** Realtime is primary; visible fallback polling and bounded bursts reconcile missed events. */
+export function watchVisibleData(run: () => void | Promise<unknown>, options: { fallbackMs?: number; reconcileMs?: number; minIntervalMs?: number } = {}) {
+  const fallbackMs = options.fallbackMs ?? 60_000
+  const reconcileMs = options.reconcileMs ?? 150_000
+  const minIntervalMs = options.minIntervalMs ?? 5_000
+  let lastStarted = Date.now()
+  let connected = false
+  let subscribedBefore = false
+  let disposed = false
+  let busy = false
+  let dirty = false
+  let scheduled: number | undefined
+  const visible = () => document.visibilityState === 'visible'
+  const execute = () => {
+    scheduled = undefined
+    if (disposed || !visible()) return
+    if (busy) { dirty = true; return }
+    busy = true
+    dirty = false
+    lastStarted = Date.now()
+    void Promise.resolve().then(run).catch(() => undefined).finally(() => {
+      busy = false
+      if (dirty) trigger()
+    })
+  }
+  const trigger = () => {
+    if (disposed) return
+    dirty = true
+    if (!visible() || busy || scheduled !== undefined) return
+    scheduled = window.setTimeout(execute, Math.max(300, minIntervalMs - (Date.now() - lastStarted)))
+  }
+  const interval = window.setInterval(() => {
+    if (!connected || Date.now() - lastStarted >= reconcileMs) trigger()
+  }, fallbackMs)
+  const resume = () => { if (visible()) trigger() }
+  window.addEventListener('focus', resume)
+  document.addEventListener('visibilitychange', resume)
+  return {
+    trigger,
+    status(status: string) {
+      if (status === 'SUBSCRIBED') {
+        const reconnect = subscribedBefore && !connected
+        connected = true
+        subscribedBefore = true
+        if (reconnect) trigger()
+      } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) connected = false
+    },
+    dispose() {
+      disposed = true
+      window.clearInterval(interval)
+      window.clearTimeout(scheduled)
+      window.removeEventListener('focus', resume)
+      document.removeEventListener('visibilitychange', resume)
+    },
+  }
+}
+
 export function downloadBlob(blob: Blob, name: string) {
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)

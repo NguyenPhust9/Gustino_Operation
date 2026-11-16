@@ -266,7 +266,7 @@ const [shiftRegistrations, setShiftRegistrations] = useState<ShiftRegistration[]
       fetchShiftRegistrations(user, { branchId: user.branchId, from: businessDate, to: businessDate, readContext }),
       fetchAttendanceRecords(user, { branchId: user.branchId, from: businessDate, to: businessDate, readContext }),
       fetchSalesReceipts(user, { branchId: user.branchId, date: businessDate }),
-      fetchReportSnapshots(user.branchId, user),
+      fetchReportSnapshots(user.branchId, user, { from: businessDate, to: businessDate }),
     ])
     return { sessions, allocations, registrations, records, receipts, snapshots }
   }

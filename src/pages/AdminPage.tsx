@@ -26,8 +26,10 @@ import { canOpenAdminConsole, employeePositionLabel, isBranchlessRole, isReadOnl
 import { useLang } from '../lib/i18n'
 import { PRODUCTS, getPackingOptionsByOutput, getProducts, productById } from '../lib/constants'
 import { branchName as configuredBranchName, syncConfiguredBranchRows, useConfiguredBranches, writeConfiguredBranchRows, type ConfigBranch } from '../lib/branches'
-import { burstGuard, downloadBlob, shareOrDownloadBlob } from '../lib/browser'
-import { calculateStock, ensureOperationDay, fetchInventoryReports, fetchMovements, fetchReportSnapshots, stockAdjustmentDeltas, sumStockAdjustments, type StockAdjustment } from '../lib/store'
+import { watchVisibleData, downloadBlob, shareOrDownloadBlob } from '../lib/browser'
+import { dashboardEventInScope, fetchDashboardMovements, fetchDashboardSnapshots, invalidateDashboardEvent } from '../lib/dashboardData'
+import { invalidateReadCache } from '../lib/readCache'
+import { calculateStock, ensureOperationDay, fetchInventoryReports, stockAdjustmentDeltas, sumStockAdjustments, type StockAdjustment } from '../lib/store'
 import { QUANTITY_DECIMALS, formatStockAmount } from '../lib/inventoryEntry'
 import { supabase, uniqueChannelName } from '../lib/supabase'
 import { fetchBagAllocations, fetchBagShiftSessions, reopenBagShift } from '../lib/shiftLedger'
@@ -531,6 +533,10 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
       managementRefreshQueuedRef.current = true
       return managementRefreshInFlightRef.current
     }
+    if (showLoading) {
+      invalidateReadCache('stock_movements')
+      invalidateReadCache('report_snapshots')
+    }
     if (showLoading) setLoading(true)
     const run = (async () => {
       try {
@@ -564,12 +570,12 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
         dataNeeds.has('registrations') ? fetchShiftRegistrations(user, { from: receiptFrom, to: receiptTo, readContext }) : Promise.resolve(registrations),
         dataNeeds.has('records') ? fetchAttendanceRecords(user, { from: receiptFrom, to: receiptTo, readContext }) : Promise.resolve(records),
         dataNeeds.has('adjustments') ? fetchAttendanceAdjustments(user, { from: receiptFrom, to: receiptTo }) : Promise.resolve(attendanceAdjustments),
-        dataNeeds.has('movements') ? revenueSafe('kho hàng', Promise.all(managedBranchIds.map((id) => fetchMovements(id, user))).then((items) => items.flat()), movements) : Promise.resolve(movements),
+        dataNeeds.has('movements') ? revenueSafe('kho hàng', Promise.all(managedBranchIds.map((id) => fetchDashboardMovements(id, user))).then((items) => items.flat()), movements) : Promise.resolve(movements),
         dataNeeds.has('inventoryReports') ? Promise.all(managedBranchIds.map((id) => fetchInventoryReports(id, user))).then((items) => items.flat()) : Promise.resolve(inventoryReports),
         dataNeeds.has('allocations') ? revenueSafe('phát túi', Promise.all(managedBranchIds.map((id) => fetchBagAllocations(user, { branchId: id }))).then((items) => items.flat()), bagAllocations) : Promise.resolve(bagAllocations),
         dataNeeds.has('sessions') ? Promise.all(managedBranchIds.map((id) => fetchBagShiftSessions(user, { branchId: id, from: receiptFrom, to: receiptTo }))).then((items) => items.flat()) : Promise.resolve(bagSessions),
         dataNeeds.has('requests') ? fetchSupplyRequests(user, managedBranchIds) : Promise.resolve(supplyRequests),
-        dataNeeds.has('snapshots') ? revenueSafe('báo cáo ca', Promise.all(managedBranchIds.map((id) => fetchReportSnapshots(id, user))).then((items) => items.flat()), reportSnapshots) : Promise.resolve(reportSnapshots),
+        dataNeeds.has('snapshots') ? revenueSafe('báo cáo ca', Promise.all(managedBranchIds.map((id) => fetchDashboardSnapshots(id, user, { from: receiptFrom, to: receiptTo }))).then((items) => items.flat()), reportSnapshots) : Promise.resolve(reportSnapshots),
         dataNeeds.has('receipts') ? fetchSalesReceiptsRange(user, { branchIds: managedBranchIds, from: receiptFrom, to: receiptTo }) : Promise.resolve(salesReceipts),
       ])
       setEmployees(nextEmployees)
@@ -633,6 +639,7 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
     if (user.role !== 'admin' || (focused && activeSection !== 'accounts')) return
     let active = true
     const loadActiveUsers = () => {
+      if (document.visibilityState !== 'visible') return
       void fetchActiveUsers(user).then((items) => {
         if (active) setActiveUsers(items)
       }).catch((reason) => {
@@ -650,32 +657,22 @@ export function ManagementPage({ user, initialSection, focused = false, onNaviga
   }, [user.id, user.role, activeSection, focused])
 
   useEffect(() => {
-    const refreshWhenActive = () => void refresh(false)
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refreshWhenActive()
-    }
-    const timer = window.setInterval(refreshWhenActive, 30000)
-    window.addEventListener('focus', refreshWhenActive)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
     const client = user.authToken ? null : supabase
+    const reconciliation = watchVisibleData(() => refresh(false), client ? {} : { fallbackMs: 30000 })
     if (!client) {
-      return () => {
-        window.clearInterval(timer)
-        window.removeEventListener('focus', refreshWhenActive)
-        document.removeEventListener('visibilitychange', refreshWhenVisible)
-      }
+      return reconciliation.dispose
     }
     const channel = client.channel(uniqueChannelName(`admin-live:${user.id}`))
-    const reloadSoon = burstGuard(() => void refresh(false), 400)
     managementRealtimeTables(activeSection, focused).forEach((table) => {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table }, reloadSoon)
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+        if (!dashboardEventInScope(payload, permittedBranchIds(user))) return
+        invalidateDashboardEvent(table, payload)
+        reconciliation.trigger()
+      })
     })
-    channel.subscribe()
+    channel.subscribe(reconciliation.status)
     return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', refreshWhenActive)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-      reloadSoon.cancel()
+      reconciliation.dispose()
       void client.removeChannel(channel)
     }
   }, [user.id, user.authToken, from, to, activeSection, focused])

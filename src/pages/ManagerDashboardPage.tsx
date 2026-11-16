@@ -13,10 +13,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { burstGuard } from '../lib/browser'
+import { watchVisibleData } from '../lib/browser'
 import { branchName as configuredBranchName, useConfiguredBranches } from '../lib/branches'
 import { fetchEmployees, permittedBranchIds } from '../lib/attendance'
-import { fetchMovements, fetchReportSnapshots } from '../lib/store'
+import { dashboardEventInScope, fetchDashboardMovements, fetchDashboardSnapshots, invalidateDashboardEvent } from '../lib/dashboardData'
+import { invalidateReadCache } from '../lib/readCache'
 import { fetchBagAllocations, fetchBagShiftSessions } from '../lib/shiftLedger'
 import { buildShiftLeaderRevenueRows } from '../lib/shiftCompetition'
 import { buildDailyRevenueRows } from '../lib/revenue'
@@ -51,11 +52,13 @@ export function ManagerDashboardPage({
   const [to, setTo] = useState(initialRange.to)
   const [selectedBranchId, setSelectedBranchId] = useState('')
   const [drilldownBranchId, setDrilldownBranchId] = useState('')
-  const [reloadTick, setReloadTick] = useState(0)
+  const refreshRef = useRef<() => Promise<void>>(() => Promise.resolve())
+  const pendingLoadRef = useRef<Promise<void>>(Promise.resolve())
   const branchIds = permittedBranchIds(user)
   const branchKey = branchIds.join('|')
   const configuredBranches = useConfiguredBranches({ user })
   const branches = configuredBranches.filter((branch) => branchIds.includes(branch.id))
+  const compareFrom = addDays(from, -Math.max(daysInWindow(from, to), 7))
 
   useEffect(() => {
     if (selectedBranchId && !branchIds.includes(selectedBranchId)) setSelectedBranchId('')
@@ -68,8 +71,8 @@ export function ManagerDashboardPage({
       if (!hasLoadedRef.current) setLoading(true)
       try {
         const [nextMovements, nextSnapshots, nextAllocations, nextEmployees] = await Promise.all([
-          Promise.all(branchIds.map((id) => fetchMovements(id, user))).then((items) => items.flat()),
-          Promise.all(branchIds.map((id) => fetchReportSnapshots(id, user))).then((items) => items.flat()),
+          Promise.all(branchIds.map((id) => fetchDashboardMovements(id, user))).then((items) => items.flat()),
+          Promise.all(branchIds.map((id) => fetchDashboardSnapshots(id, user, { from: compareFrom, to }))).then((items) => items.flat()),
           Promise.all(branchIds.map((id) => fetchBagAllocations(user, { branchId: id }))).then((items) => items.flat()),
           fetchEmployees(user),
         ])
@@ -89,14 +92,7 @@ export function ManagerDashboardPage({
         }
       }
     }
-    void load()
-    return () => { active = false }
-  }, [user.id, user.branchId, branchKey, reloadTick])
-
-  // Lấy thêm hóa đơn của kỳ trước + cùng kỳ tuần trước để tính % so sánh kiểu CukCuk.
-  const compareFrom = addDays(from, -Math.max(daysInWindow(from, to), 7))
-  useEffect(() => {
-    let active = true
+    // Include the previous period/week in the POS comparison inputs.
     async function loadReceipts() {
       try {
         const [nextReceipts, nextSessions] = await Promise.all([
@@ -113,44 +109,52 @@ export function ManagerDashboardPage({
         setError(`Không thể tải hóa đơn POS: ${reason instanceof Error ? reason.message : 'Máy chủ không phản hồi.'}`)
       }
     }
-    void loadReceipts()
+    const previous = pendingLoadRef.current
+    let inFlight: Promise<void> | null = null
+    let queued = false
+    const refresh = (): Promise<void> => {
+      queued = true
+      if (inFlight) return inFlight
+      const run = async () => {
+        // A date/account change waits for the old scope to finish, without applying it.
+        await previous
+        while (active && queued) {
+          queued = false
+          await Promise.all([load(), loadReceipts()])
+        }
+      }
+      inFlight = run().finally(() => { inFlight = null })
+      pendingLoadRef.current = inFlight
+      return inFlight
+    }
+    refreshRef.current = refresh
+    void refresh()
     return () => { active = false }
-  }, [user.id, user.branchId, branchKey, compareFrom, to, reloadTick])
+  }, [user.id, user.branchId, user.role, branchKey, compareFrom, to])
 
   useEffect(() => {
-    const refreshWhenActive = () => setReloadTick((tick) => tick + 1)
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refreshWhenActive()
-    }
     const client = user.authToken ? null : supabase
-    const timer = window.setInterval(refreshWhenActive, client ? 30000 : 5000)
-    window.addEventListener('focus', refreshWhenActive)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
+    const refresh = watchVisibleData(() => refreshRef.current(), client ? {} : { fallbackMs: 5000 })
     if (!client) {
-      return () => {
-        window.clearInterval(timer)
-        window.removeEventListener('focus', refreshWhenActive)
-        document.removeEventListener('visibilitychange', refreshWhenVisible)
-      }
+      return refresh.dispose
     }
-    // Dashboard nghe 7 bảng của CẢ hệ thống (không lọc chi nhánh) và mỗi lượt
-    // tải lại là loạt truy vấn nặng + vẽ lại biểu đồ. Giờ cao điểm 3 chi nhánh
-    // cùng bán thì không gộp là dashboard chạy liên tục.
-    const reloadSoon = burstGuard(refreshWhenActive, 1500)
+    // Ignore known unrelated branches; coalesce partial/joined events into one batch.
+    const changed = (table: string, payload: { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+      if (!dashboardEventInScope(payload, branchIds)) return
+      invalidateDashboardEvent(table, payload)
+      refresh.trigger()
+    }
     const channel = client.channel(uniqueChannelName(`manager-revenue-live:${branchKey}`))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_receipts' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_receipt_items' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bag_allocations' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bag_shift_sessions' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'operation_days' }, reloadSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'report_snapshots' }, reloadSoon)
-      .subscribe()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_receipts' }, (payload) => changed('sales_receipts', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales_receipt_items' }, (payload) => changed('sales_receipt_items', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bag_allocations' }, (payload) => changed('bag_allocations', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bag_shift_sessions' }, (payload) => changed('bag_shift_sessions', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, (payload) => changed('stock_movements', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'operation_days' }, (payload) => changed('operation_days', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'report_snapshots' }, (payload) => changed('report_snapshots', payload))
+      .subscribe(refresh.status)
     return () => {
-      window.clearInterval(timer)
-      reloadSoon.cancel()
-      window.removeEventListener('focus', refreshWhenActive)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      refresh.dispose()
       void client.removeChannel(channel)
     }
   }, [user.authToken, branchKey])
@@ -275,7 +279,13 @@ export function ManagerDashboardPage({
           <button
             type="button"
             className="dashboard-reload-button"
-            onClick={() => setReloadTick((tick) => tick + 1)}
+            onClick={() => {
+              branchIds.forEach((id) => {
+                invalidateReadCache('stock_movements', id)
+                invalidateReadCache('report_snapshots', id)
+              })
+              void refreshRef.current()
+            }}
             title={lang === 'en' ? 'Reload data' : 'Tải lại dữ liệu'}
           >
             ⟳ {lang === 'en' ? 'Reload' : 'Tải lại'}
